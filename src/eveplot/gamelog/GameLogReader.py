@@ -20,23 +20,25 @@ class GameLog(object):
     '''
     classdocs
     '''
+    
     __sanshas = {'Deltole Tegmentum' : None, 'Renyn Meten' : None, 'Tama Cerebellum' : None, 'Ostingele Tectum' : None, 'Vylade Dien' : None, 'Antem Neo' : None, 'Eystur Rhomben' : None, 'Auga Hypophysis' : None, 'True Power Mobile Headquarters' : None, 'Outuni Mesen' : None, 'Mara Paleo' : None, 'Yulai Crus Cerebi' : None, 'Romi Thalamus' : None, 'Intaki Colliculus' : None, 'Uitra Telen' : None, 'Schmaeel Medulla' : None, 'Arnon Epithalamus' : None}
-
+    __an_con_count = 8
 
     def __init__(self, logPath, charName):
         '''
         Constructor
         '''
-        self.__an_con_count = 15
         self.__consumer_threads = []
-        self.user = dict()
-        self.rawlog = JoinableQueue(maxsize=100)
-        self.messageQueue = JoinableQueue(maxsize=100) # seperate {username:{target:dmg}} dicts
-        self.logPath = os.path.join(logPath, "Gamelogs")
+
+        self.parsedLogFiles = []
+        self.rawlogQueue = JoinableQueue(maxsize=100)
+        self.parsedLogsQueue = JoinableQueue(maxsize=10)
+
+        self.logPath = os.path.join(logPath, "analyze")
         self.charName = charName
         start = time.time()
         self.initConsumer()
-        self.statusThread = StatusThread(self.messageQueue, self.rawlog)
+        self.statusThread = StatusThread(self.parsedLogsQueue, self.rawlogQueue)
         self.statusThread.start()
         # start a monitor thread
         self.loadLogs()
@@ -47,23 +49,27 @@ class GameLog(object):
     def initConsumer(self):
         
         for i in range(self.__an_con_count):
-            t = LogFileCreatorThread(self.rawlog, self.messageQueue, "dec"+str(i), IncommingSelector())
+            t = LogFileCreatorThread(self.rawlogQueue, self.parsedLogsQueue, "dec"+str(i))
             t.start()
             self.__consumer_threads.append(t)
             
-        t = MessageAddThread(self.messageQueue, self.user)
+        t = AppendLogfileThread(self.parsedLogsQueue, self.parsedLogFiles)
         t.start()
         self.__consumer_threads.append(t)
         print("All consumer started!")
 
     def stopConsumer(self):
-        self.rawlog.join()
-        self.messageQueue.join()
+        self.rawlogQueue.join()
+        self.parsedLogsQueue.join()
+
         for _ in range(self.__an_con_count):
-            self.rawlog.put(None)
-        self.messageQueue.put(None)
+            self.rawlogQueue.put(None)
+
+        self.parsedLogsQueue.put(None)
+
         for t in self.__consumer_threads:
             t.join()
+
         self.statusThread.stop()
 
     def loadLogs(self):
@@ -73,82 +79,66 @@ class GameLog(object):
 
         files = os.listdir(self.logPath)
         files.sort()
-        ##print(len(files))
-        ##print(files)
+
         numfiles = len(files)
         for idx, filename in enumerate(files):
             
             filepath = os.path.join(self.logPath, filename)
-            ##print("opening: ", filepath)
             #print("reading: ", idx, "/", numfiles, "path:", filepath)
             self.load(filepath)
             if idx % 500 == 0:
                 print(idx, "/", numfiles, "loaded")
         
-            
-            ##print("finsished with __status: ", logfile.getStatus())
-            '''
-            for key in logfile.getTypes():
-                #print(key)
-            '''
-            #self.logfiles.append(logfile)
-            #print("appending logfile")
-            #print("start analyze")
-            #self.addDmgMsg(logfile)
-            #print("log file analyzed")
-
-
-        #for idx, logfile in enumerate(self.logfiles):
-        #    print("parsing :", idx, "/", numfiles, "file:", logfile.getFilepath())
-
-
-        #print(self.user)
         
     #@profile
     def load(self, path):
         data = open(path, "rb").read()
-        self.rawlog.put(RawLog(path, data))
+        self.rawlogQueue.put(RawLog(path, data))
 
     def showGraph(self):
-        data = self.user['Bruce Warhead']
+        collectors = []
+        collectors.append(DamageInCollector)
+        collectors.append(MissInCollector)
+        collectors.append(EwarCollector)
+        collectors.append(EwarInCollector)
         
-        filtered_data = dict()
-        for shipname in [str(key) for key in self.__sanshas.keys()]:
-            if shipname in data:
-                filtered_data[shipname] = data[shipname]
+        graphcount = len(collectors)
         
-        data = filtered_data
+        _, plots = plt.subplots(graphcount)
         
-        names = [str(key) for key in data.keys()]
-        #print(names)
-        ind = np.arange(len(data.values()))
-
-        fig, ax = plt.subplots()
-        rects = ax.bar(ind, data.values(), 0.3, color='r')
-
-        ax.set_ylabel("y-l")
-        ax.set_xticks(ind+0.3)
-        ax.set_xticklabels(names)
-    
-    
-        for rect in rects:
+        for idx, plot in enumerate(plots):
+            collector = collectors[idx]
+            names, values =  collector.getData('Bruce Warhead', self.parsedLogFiles)
+            ind = np.arange(len(values))
+            for tick in plot.yaxis.get_major_ticks():
+                tick.label.set_fontsize(6)
+            rects = plot.barh(ind, values, 0.5, color='r')
+            plot.set_xlabel(collector.getXLabel(names, values))
+            plot.set_yticks(ind)
+            plot.set_yticklabels(names)
+            for rect in rects:
+                height = rect.get_height()
+                width = rect.get_width()
+                plot.text(1.05*width, rect.get_y() + height/2.,
+                        '%d' % int(width),
+                        ha='left', va='center', size='10')
+        '''
+        for idx, rect in enumerate(rects):
             height = rect.get_height()
             ax.text(rect.get_x() + rect.get_width()/2., 1.05*height,
-                    '%d' % int(height),
+                    data[idx],
                     ha='center', va='bottom')
+        '''
         plt.show()
 
 class LogFileCreatorThread(Process):
-    def __init__(self, tasks, results, name, selector):
+    def __init__(self, tasks, results, name):
         Process.__init__(self, daemon=True)
         self.__tasks = tasks
         self.__results = results
-        self.__selector = selector
         self.name = name
-        self.combat_parser = CombatMessageParserSimple()
         self.__out_dict = dict()
 
-    #@profile
     def run(self):
         while True:
             work = self.__tasks.get()
@@ -156,76 +146,216 @@ class LogFileCreatorThread(Process):
                 break
             self.__out_dict = dict()
             logfile = self.createLogfile(work)
-            self.analyze(logfile)
+            self.__results.put(logfile)
             self.__tasks.task_done()
             #print(self.name, "decoded")
     
     def createLogfile(self, work):
-        file = LogFile(work.filepath, work.data)
+        file = ParsedLogFile(work.filepath, work.data)
         return file
-    
-    
-    def analyze(self, logfile):
-        #print(logfile.getMessages('combat'))
-        #print(self.name, "analize into", self.__out_dict, "file", logfile.getFilepath())
-        combat_parser = self.combat_parser
-        combat_msgs = logfile.getMessages('combat')
-        #print(self.name, "Combat messages:", len(combat_msgs), "file:", logfile.getFilepath())
-        if len(combat_msgs) > 0:
-            for msg in combat_msgs:
-                #print("parse: ", msg)
-                combat_parser.feed(msg)
-                msg_parsed = combat_parser.getMsg()
-                msg_parsed.username = logfile.getCharacter()
-                #print("parsed", msg_parsed)
-                self.addToDict(msg_parsed)
-                
-                #self.__results.put(msg_parsed)
-                #print("Put message into final queue")
-                combat_parser.combat_reset()
-            #print(self.name, "sending out", {logfile.getCharacter(): self.__out_dict})
-            self.__results.put({logfile.getCharacter(): self.__out_dict})
-    
-    
-    def addToDict(self, combatmsg):
-        if (combatmsg.username == None):
-            return
-            
-        if self.__selector.use(combatmsg):
-            name = self.__selector.getName(combatmsg)
-            #print(combatmsg.effect, combatmsg.direction, combatmsg.target)
-            if name not in self.__out_dict:
-                oldDmg = 0
-            else:
-                oldDmg = self.__out_dict[name]
-            self.__out_dict[name] = oldDmg + combatmsg.effect
-            #print(self.name, "Changed:", combatmsg.target, self.__out_dict[combatmsg.target])
 
 class OutgoingSelector(object):
-    def use(self, target):
+    @staticmethod
+    def use(target):
         return (target.type == 'dmg' and target.direction == "to" and target.source == "self")
 
-    def getName(self, target):
+    @staticmethod
+    def getName(target):
         return target.target
+    
+    @staticmethod
+    def getNewValue(target, oldvalue):
+        return oldvalue + target.effect;
 
 class IncommingSelector(object):
-    def use(self, target):
+    
+    @staticmethod
+    def use(target):
         return (target.type == 'dmg' and target.direction == "from" and target.target == "self")
     
-    def getName(self, target):
+    @staticmethod
+    def getName(target):
         return target.source
+    
+    @staticmethod
+    def getNewValue(target, oldvalue):
+        return oldvalue + target.effect;
 
+class MeMissSelector(object):
+    @staticmethod
+    def use(target):
+        return (target.type == 'miss' and target.direction == 'to')
+    
+    @staticmethod
+    def getName(target):
+        return (target.target)
+    
+    @staticmethod
+    def getNewValue(target, oldvalue):
+        return oldvalue + 1;
+        
+class EwarSelector(object):
+    @staticmethod
+    def use(target):
+        is_ewar = (target.type == "ewar")
+        if is_ewar:
+            print("-----------EWAR START------------")
+            print(target)
+            #print(target.type, target.effect, target.source, target.target, target.direction, target.username)
+            print("-----------EWAR END------------")
+            return True
+        else:
+            print(target.type, target.effect, target.source, target.target, target.direction, target.username)
+            return False
+        
+    
+    @staticmethod
+    def getName(target):
+        return target.target
+    
+    @staticmethod
+    def getNewValue(target, oldvalue):
+        return oldvalue + 1
+
+class DamageInCollector(object):
+    
+    @staticmethod
+    def getData(userName, logfiles):
+        comdata = dict()
+        for file in logfiles:
+            messageList = file.getMessagesByType('combat')
+            for msg in messageList:
+                if msg.data.type == 'dmg' and msg.data.direction == 'from' and msg.data.target == 'self':
+                    
+                    dmg = None
+                    key = msg.data.source
+                    if key not in comdata:
+                        dmg = 1
+                    else:
+                        dmg = comdata[key] + msg.data.effect
+                    comdata[key] = dmg   
+        
+        values = [int(key) for key in comdata.values()]
+        names = [x for (_,x) in sorted(zip(values,[str(key) for key in comdata.keys()]), key=lambda pair: pair[0])]
+        values.sort()
+        return names, values
+
+    @staticmethod
+    def getXLabel(names, values):
+        total = 0
+        for count in values:
+            total += count
+        return "Received Damge total = " + str(total)
+                            
+class MissInCollector(object):
+    
+    @staticmethod
+    def getData(userName, logfiles):
+        comdata = dict()
+        for file in logfiles:
+            messageList = file.getMessagesByType('combat')
+            for msg in messageList:
+
+                if msg.data.type == 'miss' and msg.data.direction == 'from':
+
+                    dmg = None
+                    key = msg.data.source
+                    if key not in comdata:
+                        dmg = 1
+                    else:
+                        dmg = comdata[key] + 1
+                    comdata[key] = dmg   
+        
+        values = [int(key) for key in comdata.values()]
+        names = [x for (_,x) in sorted(zip(values,[str(key) for key in comdata.keys()]), key=lambda pair: pair[0])]
+        values.sort()
+        return names, values
+    
+    @staticmethod
+    def getXLabel(names, values):
+        total = 0
+        for count in values:
+            total += count
+        return "Number of Misses total = " + str(total)
+
+class EwarCollector(object):
+    
+    # takes a list of ParsedLogFile objects
+    @staticmethod
+    def getData(userName, logfiles):
+        combinedData = dict()
+        for file in logfiles:
+            messageList = file.getMessagesByType('combat')
+            for msg in messageList:
+                if msg.data.type == 'ewar':
+                    EwarCollector.__addMessage(combinedData, msg)
+        values = [int(key) for key in combinedData.values()]
+        names = [x for (_,x) in sorted(zip(values,[str(key) for key in combinedData.keys()]), key=lambda pair: pair[0])]
+        values.sort()
+        return names, values
+        
+    @staticmethod
+    def __addMessage(comdata, msg):
+        dmg = None
+        if msg.data.target not in comdata:
+            dmg = 1
+        else:
+            dmg = comdata[msg.data.target] + 1
+        
+        comdata[msg.data.target] = dmg
+    
+    @staticmethod
+    def getXLabel(names, values):
+        total = 0
+        for count in values:
+            total += count
+        return "Ewar attempts total = " + str(total)
+
+class EwarInCollector(object):
+    
+    # takes a list of ParsedLogFile objects
+    @staticmethod
+    def getData(userName, logfiles):
+        combinedData = dict()
+        for file in logfiles:
+            messageList = file.getMessagesByType('combat')
+            for msg in messageList:
+                if msg.data.type == 'ewar' and msg.data.target == 'self':
+                    EwarInCollector.__addMessage(combinedData, msg)
+        values = [int(key) for key in combinedData.values()]
+        names = [x for (_,x) in sorted(zip(values,[str(key) for key in combinedData.keys()]), key=lambda pair: pair[0])]
+        values.sort()
+        return names, values
+        
+    @staticmethod
+    def __addMessage(comdata, msg):
+        dmg = None
+        key = msg.data.source
+        if key not in comdata:
+            dmg = 1
+        else:
+            dmg = comdata[key] + 1
+        
+        comdata[key] = dmg
+    
+    @staticmethod
+    def getXLabel(names, values):
+        total = 0
+        for count in values:
+            total += count
+        return "Ewar attempts on me total = " + str(total)
+        
 class StatusThread(threading.Thread):
-    def __init__(self, finishQueue, rawLogQueue):
+    def __init__(self, parsedLogQueues, rawLogQueue):
         threading.Thread.__init__(self, daemon=True)
-        self.__finishQueue = finishQueue
+        self.__parsedLogQueues = parsedLogQueues
         self.__rawLogQueue = rawLogQueue
         self._stop = threading.Event()
         
     def run(self):
         while not self.stopped():
-            print("In RawLogQueue:", self.__rawLogQueue.qsize())
-            print("In FinishQueue:", self.__finishQueue.qsize())
+            print("In rawLogQueue:", self.__rawLogQueue.qsize())
+            print("In parsedLogQueues:", self.__parsedLogQueues.qsize())
             time.sleep(1)
     
     def stop(self):
@@ -233,6 +363,21 @@ class StatusThread(threading.Thread):
 
     def stopped(self):
         return self._stop.isSet()
+
+class AppendLogfileThread(threading.Thread):
+    def __init__(self, tasks, results):
+        threading.Thread.__init__(self)
+        self.__tasks = tasks
+        self.__results = results
+    
+    def run(self):
+        while True:
+            work = self.__tasks.get()
+            if work is None:
+                print("All Files added")
+                break
+            self.__results.append(work)
+            self.__tasks.task_done()
 
 class MessageAddThread(threading.Thread):
     def __init__(self, in_dicts, user):
@@ -244,7 +389,7 @@ class MessageAddThread(threading.Thread):
         while True:
             work = self.__tasks.get()
             if work is None:
-                #print("Final:", self.__out_dict)
+                print("Final:", self.__out_dict)
                 break
             #print("Add to final:", work)
             self.work(work)
@@ -274,7 +419,7 @@ class RawLog(object):
         self.filepath = path
         self.data = data
 
-class LogFile(object):
+class ParsedLogFile(object):
     __firstLine =   "-"
     __secondLine =  "  Gamelog"
     __thridLine =   "  Listener:"
@@ -286,16 +431,14 @@ class LogFile(object):
 
     def __init__(self, filepath, data):
         #print("reading", filepath)
-        self.__logdict = dict()
+        self.__messages = []
+        self.__messagesByType = dict()
         self.__status = -1
-        self.__filepath = ''
         self.__start_datetime = None
         self.__listener = None
         self.__filepath = filepath
         self.__status = self.__readFile(data)
 
-        #print(self)
-        #print(self.__logdict)
 
     def __readFile(self, data):
         '''
@@ -342,28 +485,17 @@ class LogFile(object):
 
         currentLine = file.readline()
         if not currentLine.startswith(self.__fifthLine):
-            # #print("endline>>"+currentLine+"<<")
+            #print("endline>>"+currentLine+"<<")
             return 2;
 
-        ln = 0
         msg = self.__getNextMessage(file)
         while (msg != ''):
-#            #print("msg>", msg)
-            ln += 1
-            self.__addMessage(LogMessage(ln, msg))
+#           print("msg>", msg)
+            parsedMessage = ParsedLogMessage(msg)
+            if parsedMessage.data != None: # it has a supported type
+                self.__addMessage(parsedMessage)
+            
             msg = self.__getNextMessage(file)
-#            #print("next msg>", msg)
-
-#        #print("log ended>", msg)
-
-        #file.seek(738)
-#        #print(file.readline())
-
-        #print("Contained: " + str(len(self.__logdict)) + " messages")
-        #attrs = vars(self)
-        # {'kids': 0, 'name': 'Dog', 'color': 'Spotted', 'age': 10, 'legs': 2, 'smell': 'Alot'}
-        # now dump this in some way or another
-        #print(', '.join("%s: %s" % item for item in attrs.items()))
         return 0
 
     def __getNextMessage(self, file):
@@ -402,12 +534,15 @@ class LogFile(object):
 
     def __addMessage(self, msg):
         #print("Adding to LogFile", msg.type, msg)
-        if msg.type not in self.__logdict:
-            self.__logdict[msg.type] = []
+        self.__messages.append(msg) # add message by order
+        
+        # add message by type
+        if msg.type not in self.__messagesByType:
+            self.__messagesByType[msg.type] = []
 
-        self.__logdict[msg.type].append(msg.msg)
+        self.__messagesByType[msg.type].append(msg)
 
-    def printMessages(self, msg_type):
+    def printMessagesByType(self, msg_type):
         if msg_type in self.__logdict:
             for msg in self.__logdict[msg_type]:
                 print(msg)
@@ -416,11 +551,11 @@ class LogFile(object):
             print("No messages of this msg_type")
             pass
 
-    def getMessages(self, msg_type):
+    def getMessagesByType(self, msg_type):
         if (msg_type == None):
-            return self.__logdict
-        if msg_type in self.__logdict:
-            return self.__logdict[msg_type].copy()
+            return self.__messagesByType
+        if msg_type in self.__messagesByType:
+            return self.__messagesByType[msg_type].copy()
         else:
             #print("Type", msg_type, "none existent", "Existant:", self.__logdict.keys())
             return []
@@ -437,20 +572,20 @@ class LogFile(object):
     def getFilepath(self):
         return self.__filepath
 
-class LogMessage(object):
+    def getMessagesInOrder(self):
+        return self.__messages
+
+class ParsedLogMessage(object):
 
     __regLine = re.compile("^\[ (\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2}) \] \((\w*)\) (.*)", re.S)
 
-
-    def __init__(self, number, text):
-        self.type = ''
-        self.msg = ''
+    def __init__(self, text):
+        self.type = None
         self.datetime = None
-        self.linenumber = number
+        self.data = None
         self.parseMessage(text)
 
     def parseMessage(self, text):
-        #print(text)
         matchLine = self.__regLine.search(text)
 
         self.datetime = datetime.datetime(int(matchLine.group(1)), int(matchLine.group(2)), int(matchLine.group(3)),
@@ -459,15 +594,14 @@ class LogMessage(object):
                                             )
 
         self.type = matchLine.group(7)
-        self.msg = matchLine.group(8)
-        if self.type == 'None':
-            #print("NoneType>>"+text+"<<")
-            pass
+        msgText = matchLine.group(8)
+        if self.type == 'combat':
+            self.data = CombatMessageParserSimple.parse(msgText)
         else:
-            #print("Add msg with type", self.type)
-            pass
+            print("Type", self.type, " not supported!")
+
     def __str__(self):
-        return self.msg
+        return self.data
 
 class CombatMessageParserHTML(HTMLParser):
 
@@ -540,103 +674,80 @@ class CombatMessage(object):
         self.direction = None
         self.source = None
         self.target = None
-        self.username = None
         
     def __repr__(self):
         sb = []
         for key in self.__dict__:
-            sb.append("{key}='{value}'".format(key=key, value=self.__dict__[key]))
+            sb.append("{key}={value}".format(key=key, value=self.__dict__[key]))
  
         return ', '.join(sb)
         
 class CombatMessageParserSimple(object):
+    __re_dmg = re.compile("^\s*(\d*)$")
+    __re_scram = re.compile("<color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font>(.*)\r")
+    __re_dmg_in = re.compile("<color=0xffcc0000><b>(\d*)</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)\r")
+    __re_miss_in = re.compile("(.*) misses you completely\r");
+    __re_dmg_out = re.compile("<color=0xff00ffff><b>(.*)</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)\r",)
+    __re_miss_group = re.compile("Your group of (.*) misses (.*) completely - (.*)\r")
+    __re_miss_drone = re.compile("Your (.*) misses (.*) completely - (.*)\r")
 
-    def __init__(self, *args, **kwargs):
-        self.msg = CombatMessage()
-        self.__re_dmg = re.compile("^\s*(\d*)$")
-        #self.__re_scram = re.compile(" <color=0xffffffff><b>(\w*)</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b>([^<]*)</b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font>([^<]*)")
-        self.__re_scram = re.compile("<color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font>(.*)")
-        self.__re_dmg_in = re.compile("<color=0xffcc0000><b>(\d*)</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)")
-        self.__re_miss_in = re.compile("(.*) misses you completely");
-        self.__re_dmg_out = re.compile("<color=0xff00ffff><b>(.*)</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)",)
-        self.__re_miss_group = re.compile("Your group of (.*) misses (.*) completely - (.*)")
-        self.__re_miss_drone = re.compile("Your (.*) misses (.*) completely - (.*)")
-
-    def combat_reset(self):
-        self.msg = CombatMessage()
-
-    def getType(self):
-        return self.msg.type
-
-    def getEffect(self):
-        return self.msg.effect
-
-    def getDirection(self):
-        return self.msg.direction
-
-    def getSource(self):
-        return self.msg.source
-
-    def getTarget(self):
-        return self.msg.target
-    
-    def getMsg(self):
-        return self.msg
-
-    def feed(self, txt):
-        groups = self.__re_scram.match(txt)
+    @staticmethod
+    def parse(txt):
+        msg = CombatMessage()
+        groups = CombatMessageParserSimple.__re_scram.match(txt)
         if groups != None:
-            self.msg.type = "ewar"
-            self.msg.effect = "Warp scramble attempt"
-            self.msg.direction = "from"
-            self.msg.source = groups.group(2)
-            self.msg.target = groups.group(3)
-            return
+            msg.type = "ewar"
+            msg.effect = "Warp scramble attempt"
+            msg.direction = "from"
+            msg.source = groups.group(2)
+            msg.target = groups.group(3)
+            if msg.target == 'you!':
+                msg.target = 'self'
+            return msg
 
-        groups = self.__re_dmg_in.match(txt)
+        groups = CombatMessageParserSimple.__re_dmg_in.match(txt)
         if groups != None:
-            self.msg.type = "dmg"
-            self.msg.effect = int(groups.group(1))
-            self.msg.direction = "from"
-            self.msg.source = groups.group(2)
-            self.msg.target = "self"
-            return
+            msg.type = "dmg"
+            msg.effect = int(groups.group(1))
+            msg.direction = "from"
+            msg.source = groups.group(2)
+            msg.target = "self"
+            return msg
 
-        groups = self.__re_miss_in.match(txt)
+        groups = CombatMessageParserSimple.__re_miss_in.match(txt)
         if groups != None:
-            self.msg.type = "miss"
-            self.msg.effect = None
-            self.msg.direction = "from"
-            self.msg.source = groups.group(1)
-            self.msg.target = "self"
-            return
+            msg.type = "miss"
+            msg.effect = None
+            msg.direction = "from"
+            msg.source = groups.group(1)
+            msg.target = "self"
+            return msg
 
-        groups = self.__re_dmg_out.match(txt)
+        groups = CombatMessageParserSimple.__re_dmg_out.match(txt)
         if groups != None:
-            self.msg.type = "dmg"
-            self.msg.effect = int(groups.group(1))
-            self.msg.direction = "to"
-            self.msg.source = "self"
-            self.msg.target = groups.group(2)
-            return
+            msg.type = "dmg"
+            msg.effect = int(groups.group(1))
+            msg.direction = "to"
+            msg.source = "self"
+            msg.target = groups.group(2)
+            return msg
 
-        groups = self.__re_miss_group.match(txt)
+        groups = CombatMessageParserSimple.__re_miss_group.match(txt)
         if groups != None:
-            self.msg.type = "miss"
-            self.msg.effect = None
-            self.msg.direction = "to"
-            self.msg.source = groups.group(1)
-            self.msg.target = groups.group(2)
-            return
+            msg.type = "miss"
+            msg.effect = None
+            msg.direction = "to"
+            msg.source = groups.group(1)
+            msg.target = groups.group(2)
+            return msg
 
-        groups = self.__re_miss_drone.match(txt)
+        groups = CombatMessageParserSimple.__re_miss_drone.match(txt)
         if groups != None:
-            self.msg.type = "miss"
-            self.msg.effect = None
-            self.msg.source = groups.group(1)
-            self.msg.target = groups.group(2)
-            self.msg.direction = "to"
-            return
-
-
-        print("Add:", txt)
+            msg.type = "miss drone"
+            msg.effect = 1
+            msg.source = groups.group(1)
+            msg.target = groups.group(2)
+            msg.direction = "to"
+            return msg
+        
+        return None
