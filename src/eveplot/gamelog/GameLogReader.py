@@ -20,11 +20,10 @@ class GameLog(object):
     '''
     classdocs
     '''
-    
     __sanshas = {'Deltole Tegmentum' : None, 'Renyn Meten' : None, 'Tama Cerebellum' : None, 'Ostingele Tectum' : None, 'Vylade Dien' : None, 'Antem Neo' : None, 'Eystur Rhomben' : None, 'Auga Hypophysis' : None, 'True Power Mobile Headquarters' : None, 'Outuni Mesen' : None, 'Mara Paleo' : None, 'Yulai Crus Cerebi' : None, 'Romi Thalamus' : None, 'Intaki Colliculus' : None, 'Uitra Telen' : None, 'Schmaeel Medulla' : None, 'Arnon Epithalamus' : None,
                  'Sansha\'s Nation Commander' : None }
                  
-    __an_con_count = 3
+    __an_con_count = 8
 
     def __init__(self, logPath, charName):
         '''
