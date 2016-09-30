@@ -20,23 +20,27 @@ class GameLog(object):
     '''
     classdocs
     '''
-    __sanshas = {'Deltole Tegmentum' : None, 'Renyn Meten' : None, 'Tama Cerebellum' : None, 'Ostingele Tectum' : None, 'Vylade Dien' : None, 'Antem Neo' : None, 'Eystur Rhomben' : None, 'Auga Hypophysis' : None, 'True Power Mobile Headquarters' : None, 'Outuni Mesen' : None, 'Mara Paleo' : None, 'Yulai Crus Cerebi' : None, 'Romi Thalamus' : None, 'Intaki Colliculus' : None, 'Uitra Telen' : None, 'Schmaeel Medulla' : None, 'Arnon Epithalamus' : None}
-
+    
+    __sanshas = {'Deltole Tegmentum' : None, 'Renyn Meten' : None, 'Tama Cerebellum' : None, 'Ostingele Tectum' : None, 'Vylade Dien' : None, 'Antem Neo' : None, 'Eystur Rhomben' : None, 'Auga Hypophysis' : None, 'True Power Mobile Headquarters' : None, 'Outuni Mesen' : None, 'Mara Paleo' : None, 'Yulai Crus Cerebi' : None, 'Romi Thalamus' : None, 'Intaki Colliculus' : None, 'Uitra Telen' : None, 'Schmaeel Medulla' : None, 'Arnon Epithalamus' : None,
+                 'Sansha\'s Nation Commander' : None }
+                 
+    __an_con_count = 3
 
     def __init__(self, logPath, charName):
         '''
         Constructor
         '''
-        self.__an_con_count = 15
         self.__consumer_threads = []
-        self.user = dict()
-        self.rawlog = JoinableQueue(maxsize=100)
-        self.messageQueue = JoinableQueue(maxsize=100) # seperate {username:{target:dmg}} dicts
-        self.logPath = os.path.join(logPath, "Gamelogs")
+
+        self.parsedLogFiles = []
+        self.rawlogQueue = JoinableQueue(maxsize=100)
+        self.parsedLogsQueue = JoinableQueue(maxsize=10)
+
+        self.logPath = os.path.join(logPath, "analyze")
         self.charName = charName
         start = time.time()
         self.initConsumer()
-        self.statusThread = StatusThread(self.messageQueue, self.rawlog)
+        self.statusThread = StatusThread(self.parsedLogsQueue, self.rawlogQueue)
         self.statusThread.start()
         # start a monitor thread
         self.loadLogs()
