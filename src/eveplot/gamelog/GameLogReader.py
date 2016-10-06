@@ -307,7 +307,7 @@ class CollectorDamageIn(Collector):
         total = 0
         for count in values:
             total += count
-        return "Received Damge Total = " + str(total)
+        return self.userName + " Received Damge Total = " + str(total)
 
 class CollectorDamageOut(Collector):
     
@@ -327,7 +327,7 @@ class CollectorDamageOut(Collector):
         total = 0
         for count in values:
             total += count
-        return "Dealt Damge Total = " + str(total)
+        return self.userName + " Dealt Damge Total = " + str(total)
 
 class CollectorDamageOutWeapon(Collector):
     
