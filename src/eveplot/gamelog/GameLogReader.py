@@ -765,6 +765,8 @@ class CombatMessage(object):
         self.direction = None
         self.source = None
         self.target = None
+        self.weapon = None
+        self.quality = None
         
     def __repr__(self):
         sb = []
@@ -778,7 +780,7 @@ class CombatMessageParserSimple(object):
     __re_scram = re.compile("<color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font>(.*)\r")
     __re_dmg_in = re.compile("<color=0xffcc0000><b>(\d*)</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)\r")
     __re_miss_in = re.compile("(.*) misses you completely\r");
-    __re_dmg_out = re.compile("<color=0xff00ffff><b>(.*)</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)\r")
+    __re_dmg_out = re.compile("<color=0xff00ffff><b>(?P<dmg>.*)</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>(?P<target>.*)</b><font size=10><color=0x77ffffff> - (?P<weapon>.*) - (?P<quality>.*)\r")
     __re_miss_group = re.compile("Your group of (.*) misses (.*) completely - (.*)\r")
     __re_miss_drone = re.compile("Your (.*) misses (.*) completely - (.*)\r")
 
@@ -794,6 +796,8 @@ class CombatMessageParserSimple(object):
             msg.target = groups.group(3)
             if msg.target == 'you!':
                 msg.target = 'self'
+            msg.weapon = None
+            msg.quality = None
             return msg
 
         groups = CombatMessageParserSimple.__re_dmg_in.match(txt)
@@ -803,6 +807,8 @@ class CombatMessageParserSimple(object):
             msg.direction = "from"
             msg.source = groups.group(2)
             msg.target = "self"
+            msg.weapon = None
+            msg.quality = None
             return msg
 
         groups = CombatMessageParserSimple.__re_miss_in.match(txt)
@@ -812,15 +818,19 @@ class CombatMessageParserSimple(object):
             msg.direction = "from"
             msg.source = groups.group(1)
             msg.target = "self"
+            msg.weapon = None
+            msg.quality = None
             return msg
 
         groups = CombatMessageParserSimple.__re_dmg_out.match(txt)
         if groups != None:
             msg.type = "dmg"
-            msg.effect = int(groups.group(1))
+            msg.effect = int(groups.group('dmg'))
             msg.direction = "to"
             msg.source = "self"
-            msg.target = groups.group(2)
+            msg.target = groups.group('target')
+            msg.weapon = groups.group('weapon')
+            msg.quality = groups.group('quality')
             return msg
 
         groups = CombatMessageParserSimple.__re_miss_group.match(txt)
@@ -830,6 +840,8 @@ class CombatMessageParserSimple(object):
             msg.direction = "to"
             msg.source = groups.group(1)
             msg.target = groups.group(2)
+            msg.weapon = None
+            msg.quality = None
             return msg
 
         groups = CombatMessageParserSimple.__re_miss_drone.match(txt)
@@ -839,6 +851,8 @@ class CombatMessageParserSimple(object):
             msg.source = groups.group(1)
             msg.target = groups.group(2)
             msg.direction = "to"
+            msg.weapon = None
+            msg.quality = None
             return msg
         
         return None
