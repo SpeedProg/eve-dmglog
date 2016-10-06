@@ -329,6 +329,30 @@ class CollectorDamageOut(Collector):
             total += count
         return "Dealt Damge Total = " + str(total)
 
+class CollectorDamageOutWeapon(Collector):
+    
+    def __init__(self, userName, weapon, logfiles, testServer = False, liveServer = True):
+        Collector.__init__(self, userName, logfiles, testServer, liveServer)
+        self.weapon = weapon
+
+    def getKey(self, msg):
+        return msg.data.target
+    
+    def getMsgList(self, file):
+        return file.getMessagesByType('combat')
+
+    def skipmsg(self, msg):
+        return Collector.skipmsg(self, msg) or not (msg.data.type == 'dmg' and msg.data.direction == "to" and msg.data.source == "self" and msg.data.weapon == self.weapon)
+
+    def getNewValue(self, target, oldval):
+        return oldval + target.data.effect
+
+    def getXLabel(self, names, values):
+        total = 0
+        for count in values:
+            total += count
+        return self.userName + " Dealt Damage with " + self.weapon + " Total = " + str(total)
+
 class CollectorMissIn(Collector):
     
     def getKey(self, msg):
