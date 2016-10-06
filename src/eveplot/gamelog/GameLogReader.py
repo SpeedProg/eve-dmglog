@@ -14,18 +14,25 @@ from profilehooks import profile
 import threading
 from multiprocessing import JoinableQueue, Process
 import io
-import time
+import time, pickle
+import json
+
+def escapeLaTeX(tech):
+    tech = tech.replace("\\", "\\textbackslash")
+    tech = tech.replace("^", "\\textasciicircum")
+    tech = tech.replace("~", "\\textasciitilde")
+    escapes = ['&', '%', '$', '#', '_', '{', '}']
+    for es in escapes:
+        tech = tech.replace(es, '\\'+es)
+    return tech
 
 class GameLog(object):
     '''
     classdocs
     '''
-    __sanshas = {'Deltole Tegmentum' : None, 'Renyn Meten' : None, 'Tama Cerebellum' : None, 'Ostingele Tectum' : None, 'Vylade Dien' : None, 'Antem Neo' : None, 'Eystur Rhomben' : None, 'Auga Hypophysis' : None, 'True Power Mobile Headquarters' : None, 'Outuni Mesen' : None, 'Mara Paleo' : None, 'Yulai Crus Cerebi' : None, 'Romi Thalamus' : None, 'Intaki Colliculus' : None, 'Uitra Telen' : None, 'Schmaeel Medulla' : None, 'Arnon Epithalamus' : None,
-                 'Sansha\'s Nation Commander' : None }
-                 
-    __an_con_count = 8
+    __an_con_count = 4
 
-    def __init__(self, logPath, charName):
+    def __init__(self, logPath):
         '''
         Constructor
         '''
@@ -33,10 +40,11 @@ class GameLog(object):
 
         self.parsedLogFiles = []
         self.rawlogQueue = JoinableQueue(maxsize=100)
-        self.parsedLogsQueue = JoinableQueue(maxsize=10)
+        self.parsedLogsQueue = JoinableQueue(maxsize=100)
 
-        self.logPath = os.path.join(logPath, "analyze")
-        self.charName = charName
+        self.logPath = logPath
+
+    def loadDataFromLogs(self):
         start = time.time()
         self.initConsumer()
         self.statusThread = StatusThread(self.parsedLogsQueue, self.rawlogQueue)
@@ -60,13 +68,18 @@ class GameLog(object):
         print("All consumer started!")
 
     def stopConsumer(self):
+        print("Trying to join RawLogQueue")
         self.rawlogQueue.join()
+        print("Trying to join parsedLogsQueue")
         self.parsedLogsQueue.join()
 
         for _ in range(self.__an_con_count):
             self.rawlogQueue.put(None)
 
+
         self.parsedLogsQueue.put(None)
+
+        print("Waiting for Consumers")
 
         for t in self.__consumer_threads:
             t.join()
@@ -95,43 +108,101 @@ class GameLog(object):
     def load(self, path):
         data = open(path, "rb").read()
         self.rawlogQueue.put(RawLog(path, data))
+    
+    def save_to_file(self, path):
+        with open(path, 'wb') as output:
+            pickle.dump(self.parsedLogFiles, output, pickle.HIGHEST_PROTOCOL)
+    
+    def load_from_file(self, path):
+        with open(path, 'rb') as inf:
+            self.parsedLogFiles = pickle.load(inf)
+        
 
-    def showGraph(self):
+    def showGraph(self, name, aspic = False):
         collectors = []
-        collectors.append(DamageInCollector)
-        collectors.append(DamageOutCollector)
-        collectors.append(MissInCollector)
-        collectors.append(EwarCollector)
-        collectors.append(EwarInCollector)
+        collectors.append(CollectorDamageIn(name, self.parsedLogFiles))
+        collectors.append(CollectorDamageOut(name, self.parsedLogFiles))
+        collectors.append(CollectorEwarIn(name, self.parsedLogFiles))
+        collectors.append(CollectorEwarOut(name, self.parsedLogFiles))
+        collectors.append(CollectorEwarOutOthers(name, self.parsedLogFiles))
+        collectors.append(CollectorMissIn(name, self.parsedLogFiles))
+        collectors.append(CollectorMissOut(name, self.parsedLogFiles))
+        
+        self.showGraphForCollectors(collectors, aspic)
+
+    def showGraphForCollectors(self, collectors, aspic):
         
         graphcount = len(collectors)
+        plt.switch_backend('TkAgg')
         
-        _, plots = plt.subplots(graphcount)
-        
-        for idx, plot in enumerate(plots):
-            collector = collectors[idx]
-            names, values =  collector.getData('Bruce Warhead', self.parsedLogFiles)
-            ind = np.arange(len(values))
-            for tick in plot.yaxis.get_major_ticks():
-                tick.label.set_fontsize(6)
-            rects = plot.barh(ind, values, 0.5, color='r')
-            plot.set_xlabel(collector.getXLabel(names, values))
-            plot.set_yticks(ind)
-            plot.set_yticklabels(names)
-            for rect in rects:
-                height = rect.get_height()
-                width = rect.get_width()
-                plot.text(1.05*width, rect.get_y() + height/2.,
-                        '%d' % int(width),
-                        ha='left', va='center', size='10')
-        '''
-        for idx, rect in enumerate(rects):
-            height = rect.get_height()
-            ax.text(rect.get_x() + rect.get_width()/2., 1.05*height,
-                    data[idx],
-                    ha='center', va='bottom')
-        '''
-        plt.show()
+        if (aspic):
+            for idx, collector in enumerate(collectors):
+                print (str(idx), collector.__class__.__name__)
+                fig, plot = plt.subplots(1)
+    
+                names, values =  collector.getData()
+                nCount = len(names)
+                print("Enitiy Count", nCount)
+                if nCount <= 0:
+                    continue
+                fig.set_size_inches(350, nCount/10)
+                ind = np.arange(nCount)
+                for tick in plot.yaxis.get_major_ticks():
+                    tick.label.set_fontsize(6)
+                rects = plot.barh(ind, values, 0.7, color='r', linewidth=0)
+                plot.set_xlabel(collector.getXLabel(names, values))
+                plot.set_yticks(ind)
+                # filternames bc labels are resticted LaTeX
+                names = [escapeLaTeX(name) for name in names]
+                plot.set_yticklabels(names)
+                for rect in rects:
+                    height = rect.get_height()
+                    width = rect.get_width()
+                    plot.text(width+100, rect.get_y() + height/2.,
+                            '%d' % int(width),
+                            ha='left', va='center', size='5')
+
+                fig.savefig(collector.__class__.__name__+".png", format="png", dpi=100)
+        else:
+            fig, plots = plt.subplots(graphcount)
+            if graphcount <= 1:
+                idx = 0
+                plot = plots
+    
+                collector = collectors[0]
+                names, values =  collector.getData()
+                fig.set_size_inches(10, len(values)/2)
+                ind = np.arange(len(values))
+                for tick in plot.yaxis.get_major_ticks():
+                    tick.label.set_fontsize(6)
+                rects = plot.barh(ind, values, 0.5, color='r')
+                plot.set_xlabel(collector.getXLabel(names, values))
+                plot.set_yticks(ind)
+                plot.set_yticklabels(names, fontsize=5)
+                for rect in rects:
+                    height = rect.get_height()
+                    width = rect.get_width()
+                    plot.text(1.05*width, rect.get_y() + height/2.,
+                            '%d' % int(width),
+                            ha='left', va='center', size='10')
+            else:
+                for idx, plot in enumerate(plots):
+                    collector = collectors[idx]
+                    names, values =  collector.getData()
+                    ind = np.arange(len(values))
+                    for tick in plot.yaxis.get_major_ticks():
+                        tick.label.set_fontsize(6)
+                    rects = plot.barh(ind, values, 0.5, color='r')
+                    plot.set_xlabel(collector.getXLabel(names, values))
+                    plot.set_yticks(ind)
+                    plot.set_yticklabels(names)
+                    for rect in rects:
+                        height = rect.get_height()
+                        width = rect.get_width()
+                        plot.text(1.05*width, rect.get_y() + height/2.,
+                                '%d' % int(width),
+                                ha='left', va='center', size='10')
+            plt.show()
 
 class LogFileCreatorThread(Process):
     def __init__(self, tasks, results, name):
@@ -156,228 +227,208 @@ class LogFileCreatorThread(Process):
         f = ParsedLogFile(work.filepath, work.data)
         return f
 
-class OutgoingSelector(object):
-    @staticmethod
-    def use(target):
-        return (target.type == 'dmg' and target.direction == "to" and target.source == "self")
-
-    @staticmethod
-    def getName(target):
-        return target.target
+class Collector(object):
+    def __init__(self, userName, logfiles, testServer = False, liveServer = True):
+        self.testServer = testServer
+        self.liveServer = liveServer
+        self.userName = userName
+        self.files = logfiles
+        self.names = None
+        self.values = None
     
-    @staticmethod
-    def getNewValue(target, oldvalue):
-        return oldvalue + target.effect;
-
-class IncommingSelector(object):
-    
-    @staticmethod
-    def use(target):
-        return (target.type == 'dmg' and target.direction == "from" and target.target == "self")
-    
-    @staticmethod
-    def getName(target):
-        return target.source
-    
-    @staticmethod
-    def getNewValue(target, oldvalue):
-        return oldvalue + target.effect;
-
-class MeMissSelector(object):
-    @staticmethod
-    def use(target):
-        return (target.type == 'miss' and target.direction == 'to')
-    
-    @staticmethod
-    def getName(target):
-        return (target.target)
-    
-    @staticmethod
-    def getNewValue(target, oldvalue):
-        return oldvalue + 1;
-        
-class EwarSelector(object):
-    @staticmethod
-    def use(target):
-        is_ewar = (target.type == "ewar")
-        if is_ewar:
-            print("-----------EWAR START------------")
-            print(target)
-            #print(target.type, target.effect, target.source, target.target, target.direction, target.username)
-            print("-----------EWAR END------------")
+    def skipfile(self, file):
+        if (file.getCharacter() != self.userName):
             return True
-        else:
-            print(target.type, target.effect, target.source, target.target, target.direction, target.username)
-            return False
-        
+        if file.is_testserver and not self.testServer:
+            return True
+        if not file.is_testserver and not self.liveServer:
+            return True
     
-    @staticmethod
-    def getName(target):
-        return target.target
-    
-    @staticmethod
-    def getNewValue(target, oldvalue):
-        return oldvalue + 1
+    def skipmsg(self, msg):
+        return False
 
-class DamageInCollector(object):
+    def getMsgList(self, file):
+        return file.getMessagesInOrder()
     
-    @staticmethod
-    def getData(userName, logfiles):
+    def getNewValue(self, target, oldval):
+        return oldval+1
+    
+    def getXLabel(self, names, values):
+        return "Undefined"
+    
+    def getKey(self, msg):
+        return msg.data.source
+    
+    def getData(self):
+        if (self.names is not None and self.values is not None):
+            return self.names, self.values
+
         comdata = dict()
-        for file in logfiles:
-            messageList = file.getMessagesByType('combat')
+        for file in self.files:
+            if (self.skipfile(file)):
+                continue
+
+            messageList = self.getMsgList(file)
             for msg in messageList:
-                if msg.data.type == 'dmg' and msg.data.direction == 'from' and msg.data.target == 'self':
-                    
-                    dmg = None
-                    key = msg.data.source
-                    if key not in comdata:
-                        dmg = msg.data.effect
-                    else:
-                        dmg = comdata[key] + msg.data.effect
-                    comdata[key] = dmg   
+                if (self.skipmsg(msg)):
+                    continue
+                dmg = None
+                key = self.getKey(msg)
+                if key not in comdata:
+                    dmg = self.getNewValue(msg, 0)
+                else:
+                    dmg = self.getNewValue(msg, comdata[key])
+                comdata[key] = dmg
         
         values = [int(key) for key in comdata.values()]
         names = [x for (_,x) in sorted(zip(values,[str(key) for key in comdata.keys()]), key=lambda pair: pair[0])]
         values.sort()
+
+        self.names = names
+        self.values = values
+
         return names, values
 
-    @staticmethod
-    def getXLabel(names, values):
+class CollectorDamageIn(Collector):
+    
+    def getKey(self, msg):
+        return msg.data.source
+    
+    def getMsgList(self, file):
+        return file.getMessagesByType('combat')
+
+    def skipmsg(self, msg):
+        return Collector.skipmsg(self, msg) or not (msg.data.type == 'dmg' and msg.data.direction == 'from' and msg.data.target == 'self')
+
+    def getNewValue(self, target, oldval):
+        return oldval + target.data.effect
+
+    def getXLabel(self, names, values):
         total = 0
         for count in values:
             total += count
-        return "Received Damge total = " + str(total)
+        return "Received Damge Total = " + str(total)
 
-class DamageOutCollector(object):
+class CollectorDamageOut(Collector):
     
-    @staticmethod
-    def getData(userName, logfiles):
-        comdata = dict()
-        for file in logfiles:
-            messageList = file.getMessagesByType('combat')
-            for msg in messageList:
-                
-                if OutgoingSelector.use(msg.data):
-                    
-                    dmg = None
-                    key = OutgoingSelector.getName(msg.data)
-                    if key not in comdata:
-                        dmg = OutgoingSelector.getNewValue(msg.data, 0)
-                    else:
-                        dmg = OutgoingSelector.getNewValue(msg.data, comdata[key])
-                    comdata[key] = dmg   
-        
-        values = [int(key) for key in comdata.values()]
-        names = [x for (_,x) in sorted(zip(values,[str(key) for key in comdata.keys()]), key=lambda pair: pair[0])]
-        values.sort()
-        return names, values
+    def getKey(self, msg):
+        return msg.data.target
+    
+    def getMsgList(self, file):
+        return file.getMessagesByType('combat')
 
-    @staticmethod
-    def getXLabel(names, values):
+    def skipmsg(self, msg):
+        return Collector.skipmsg(self, msg) or not (msg.data.type == 'dmg' and msg.data.direction == "to" and msg.data.source == "self")
+
+    def getNewValue(self, target, oldval):
+        return oldval + target.data.effect
+
+    def getXLabel(self, names, values):
         total = 0
         for count in values:
             total += count
-        return "Dealt Damage total = " + str(total)
-                            
-class MissInCollector(object):
-    
-    @staticmethod
-    def getData(userName, logfiles):
-        comdata = dict()
-        for file in logfiles:
-            messageList = file.getMessagesByType('combat')
-            for msg in messageList:
+        return "Dealt Damge Total = " + str(total)
 
-                if msg.data.type == 'miss' and msg.data.direction == 'from':
-
-                    dmg = None
-                    key = msg.data.source
-                    if key not in comdata:
-                        dmg = 1
-                    else:
-                        dmg = comdata[key] + 1
-                    comdata[key] = dmg   
-        
-        values = [int(key) for key in comdata.values()]
-        names = [x for (_,x) in sorted(zip(values,[str(key) for key in comdata.keys()]), key=lambda pair: pair[0])]
-        values.sort()
-        return names, values
+class CollectorMissIn(Collector):
     
-    @staticmethod
-    def getXLabel(names, values):
+    def getKey(self, msg):
+        return msg.data.source
+    
+    def getMsgList(self, file):
+        return file.getMessagesByType('combat')
+
+    def skipmsg(self, msg):
+        return Collector.skipmsg(self, msg) or not (msg.data.type == 'miss' and msg.data.direction == 'from' and msg.data.target == 'self')
+
+    def getNewValue(self, target, oldval):
+        return oldval + 1
+
+    def getXLabel(self, names, values):
         total = 0
         for count in values:
             total += count
-        return "Number of Misses total = " + str(total)
+        return "Number of Misses On Me Total = " + str(total)
 
-class EwarCollector(object):
+class CollectorMissOut(Collector):
     
-    # takes a list of ParsedLogFile objects
-    @staticmethod
-    def getData(userName, logfiles):
-        combinedData = dict()
-        for file in logfiles:
-            messageList = file.getMessagesByType('combat')
-            for msg in messageList:
-                if msg.data.type == 'ewar':
-                    EwarCollector.__addMessage(combinedData, msg)
-        values = [int(key) for key in combinedData.values()]
-        names = [x for (_,x) in sorted(zip(values,[str(key) for key in combinedData.keys()]), key=lambda pair: pair[0])]
-        values.sort()
-        return names, values
-        
-    @staticmethod
-    def __addMessage(comdata, msg):
-        dmg = None
-        if msg.data.target not in comdata:
-            dmg = 1
-        else:
-            dmg = comdata[msg.data.target] + 1
-        
-        comdata[msg.data.target] = dmg
+    def getKey(self, msg):
+        return msg.data.target
     
-    @staticmethod
-    def getXLabel(names, values):
+    def getMsgList(self, file):
+        return file.getMessagesByType('combat')
+
+    def skipmsg(self, msg):
+        return Collector.skipmsg(self, msg) or not (msg.data.type == 'miss' and msg.data.direction == 'to' and msg.data.source == 'self')
+
+    def getNewValue(self, target, oldval):
+        return oldval + 1
+
+    def getXLabel(self, names, values):
         total = 0
         for count in values:
             total += count
-        return "Ewar attempts total = " + str(total)
+        return "Number of Misses By Me Total = " + str(total)
 
-class EwarInCollector(object):
+class CollectorEwarOutOthers(Collector):
     
-    # takes a list of ParsedLogFile objects
-    @staticmethod
-    def getData(userName, logfiles):
-        combinedData = dict()
-        for file in logfiles:
-            messageList = file.getMessagesByType('combat')
-            for msg in messageList:
-                if msg.data.type == 'ewar' and msg.data.target == 'self':
-                    EwarInCollector.__addMessage(combinedData, msg)
-        values = [int(key) for key in combinedData.values()]
-        names = [x for (_,x) in sorted(zip(values,[str(key) for key in combinedData.keys()]), key=lambda pair: pair[0])]
-        values.sort()
-        return names, values
-        
-    @staticmethod
-    def __addMessage(comdata, msg):
-        dmg = None
-        key = msg.data.source
-        if key not in comdata:
-            dmg = 1
-        else:
-            dmg = comdata[key] + 1
-        
-        comdata[key] = dmg
+    def getKey(self, msg):
+        return msg.data.source + ' => ' + msg.data.target
     
-    @staticmethod
-    def getXLabel(names, values):
+    def getMsgList(self, file):
+        return file.getMessagesByType('combat')
+
+    def skipmsg(self, msg):
+        return Collector.skipmsg(self, msg) or not (msg.data.type == 'ewar' and msg.data.target != 'self' and msg.data.source != 'self')
+
+    def getNewValue(self, target, oldval):
+        return oldval + 1
+
+    def getXLabel(self, names, values):
+        total = 0
+        for count in values:
+            total += count
+        return "Ewar attempts done between others total = " + str(total)
+
+class CollectorEwarIn(Collector):
+
+    def getKey(self, msg):
+        return msg.data.source
+
+    def getMsgList(self, file):
+        return file.getMessagesByType('combat')
+
+    def skipmsg(self, msg):
+        return Collector.skipmsg(self, msg) or not (msg.data.type == 'ewar' and msg.data.target == 'self')
+
+    def getNewValue(self, target, oldval):
+        return oldval + 1
+
+    def getXLabel(self, names, values):
         total = 0
         for count in values:
             total += count
         return "Ewar attempts on me total = " + str(total)
-        
+
+class CollectorEwarOut(Collector):
+
+    def getKey(self, msg):
+        return msg.data.target
+
+    def getMsgList(self, file):
+        return file.getMessagesByType('combat')
+
+    def skipmsg(self, msg):
+        return Collector.skipmsg(self, msg) or not (msg.data.type == 'ewar' and msg.data.source == 'self')
+
+    def getNewValue(self, target, oldval):
+        return oldval + 1
+
+    def getXLabel(self, names, values):
+        total = 0
+        for count in values:
+            total += count
+        return "Ewar attempts by me total = " + str(total)
+
 class StatusThread(threading.Thread):
     def __init__(self, parsedLogQueues, rawLogQueue):
         threading.Thread.__init__(self, daemon=True)
@@ -453,6 +504,8 @@ class RawLog(object):
         self.data = data
 
 class ParsedLogFile(object):
+    __sanshas = {'Deltole Tegmentum' : None, 'Renyn Meten' : None, 'Tama Cerebellum' : None, 'Ostingele Tectum' : None, 'Vylade Dien' : None, 'Antem Neo' : None, 'Eystur Rhomben' : None, 'Auga Hypophysis' : None, 'True Power Mobile Headquarters' : None, 'Outuni Mesen' : None, 'Mara Paleo' : None, 'Yulai Crus Cerebi' : None, 'Romi Thalamus' : None, 'Intaki Colliculus' : None, 'Uitra Telen' : None, 'Schmaeel Medulla' : None, 'Arnon Epithalamus' : None,
+                 'Sansha\'s Nation Commander' : None, 'Sansha Battletower' : None }
     __firstLine =   "-"
     __secondLine =  "  Gamelog"
     __thridLine =   "  Listener:"
@@ -461,7 +514,8 @@ class ParsedLogFile(object):
     __msg_start = "[ "
     _re_start_time = re.compile("^  Session Started: (\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2})\r$")
     _re_listener = re.compile("^  Listener: (.*)\r$")
-
+    is_testserver = False
+    
     def __init__(self, filepath, data):
         #print("reading", filepath)
         self.__messages = []
@@ -522,10 +576,13 @@ class ParsedLogFile(object):
             return 2;
 
         msg = self.__getNextMessage(file)
+        if '<h4> Available systems</h4>' in msg:
+            self.is_testserver = True
         while (msg != ''):
 #           print("msg>", msg)
             parsedMessage = ParsedLogMessage(msg)
             if parsedMessage.data != None: # it has a supported type
+                #if (parsedMessage.data.target == 'self' and parsedMessage.data.source in self.__sanshas) or parsedMessage.data.target in self.__sanshas:
                 self.__addMessage(parsedMessage)
             
             msg = self.__getNextMessage(file)
@@ -631,7 +688,8 @@ class ParsedLogMessage(object):
         if self.type == 'combat':
             self.data = CombatMessageParserSimple.parse(msgText)
         else:
-            print("Type", self.type, " not supported!")
+            pass
+            #print("Type", self.type, " not supported!")
 
     def __str__(self):
         return self.data
@@ -720,7 +778,7 @@ class CombatMessageParserSimple(object):
     __re_scram = re.compile("<color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font>(.*)\r")
     __re_dmg_in = re.compile("<color=0xffcc0000><b>(\d*)</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)\r")
     __re_miss_in = re.compile("(.*) misses you completely\r");
-    __re_dmg_out = re.compile("<color=0xff00ffff><b>(.*)</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)\r",)
+    __re_dmg_out = re.compile("<color=0xff00ffff><b>(.*)</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)\r")
     __re_miss_group = re.compile("Your group of (.*) misses (.*) completely - (.*)\r")
     __re_miss_drone = re.compile("Your (.*) misses (.*) completely - (.*)\r")
 
