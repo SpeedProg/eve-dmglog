@@ -110,6 +110,8 @@ class GameLog(object):
         self.rawlogQueue.put(RawLog(path, data))
     
     def save_to_file(self, path):
+        #with open(path+".json", 'w') as output:
+        #    json.dump(self.parsedLogFiles, output, cls=UtilEncoder)
         with open(path, 'wb') as output:
             pickle.dump(self.parsedLogFiles, output, pickle.HIGHEST_PROTOCOL)
     
@@ -536,19 +538,18 @@ class ParsedLogFile(object):
     __forthLine =   "  Session Started:"
     __fifthLine =   "-"
     __msg_start = "[ "
-    _re_start_time = re.compile("^  Session Started: (\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2})\r$")
-    _re_listener = re.compile("^  Listener: (.*)\r$")
-    is_testserver = False
+    __re_start_time = re.compile("^  Session Started: (\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2})\r$")
+    __re_listener = re.compile("^  Listener: (.*)\r$")
     
     def __init__(self, filepath, data):
-        #print("reading", filepath)
+        print("reading", filepath)
         self.__messages = []
-        self.__messagesByType = dict()
         self.__status = -1
         self.__start_datetime = None
         self.__listener = None
         self.__filepath = filepath
         self.__status = self.__readFile(data)
+        self.is_testserver = False
 
 
     def __readFile(self, data):
@@ -577,7 +578,7 @@ class ParsedLogFile(object):
             # #print("listener>>"+currentLine+"<<")
             return 2;
         else: # extracting character name of the listener
-            m = self._re_listener.match(currentLine)
+            m = self.__re_listener.match(currentLine)
             self.__listener = m.group(1)
 
         currentLine = file.readline()
@@ -586,7 +587,7 @@ class ParsedLogFile(object):
             return 2;
         else:
             # parse the session start
-            m = self._re_start_time.match(currentLine)
+            m = self.__re_start_time.match(currentLine)
             if (m != None):
                 self.__start_datetime = datetime.datetime(
                                int(m.group(1)), int(m.group(2)), int(m.group(3)),
@@ -649,33 +650,39 @@ class ParsedLogFile(object):
     def __addMessage(self, msg):
         #print("Adding to LogFile", msg.type, msg)
         self.__messages.append(msg) # add message by order
-        
-        # add message by type
-        if msg.type not in self.__messagesByType:
-            self.__messagesByType[msg.type] = []
-
-        self.__messagesByType[msg.type].append(msg)
 
     def printMessagesByType(self, msg_type):
-        if msg_type in self.__logdict:
-            for msg in self.__logdict[msg_type]:
+        msgSByType = self.getMessagesByType()
+        if msg_type in msgSByType:
+            for msg in msgSByType[msg_type]:
                 print(msg)
                 pass
         else:
-            print("No messages of this msg_type")
+            print("No messages of this msg_type="+msg_type)
             pass
 
-    def getMessagesByType(self, msg_type):
+    def getMessagesByType(self, msg_type = None):
+        # sort them into types
+        messagesByType = dict()
         if (msg_type == None):
-            return self.__messagesByType
-        if msg_type in self.__messagesByType:
-            return self.__messagesByType[msg_type].copy()
-        else:
-            #print("Type", msg_type, "none existent", "Existant:", self.__logdict.keys())
-            return []
+            # sort them all in
+            for msg in self.__messages:
+                if msg.type not in messagesByType:
+                    messagesByType[msg.type] = []
+                messagesByType[msg.type].append(msg)
+            # done sorting them all in
+            return messagesByType
+        
+        # else only sort those in that are of this type
+        messagesForType = []
+        for msg in self.__messages:
+            if msg.type == msg_type:
+                messagesForType.append(msg)
+        
+        return messagesForType
 
     def getTypes(self):
-        return self.__logdict.keys()
+        return self.__messagesByType.keys()
 
     def getStatus(self):
         return self.__status
@@ -880,3 +887,13 @@ class CombatMessageParserSimple(object):
             return msg
         
         return None
+
+class UtilEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime.datetime):
+            encoded_object = list(obj.timetuple())[0:7]
+        elif isinstance(obj, ParsedLogFile) or isinstance(obj, ParsedLogMessage) or isinstance(obj, CombatMessage):
+            return obj.__dict__
+        else:
+            encoded_object =json.JSONEncoder.default(self, obj)
+        return encoded_object
