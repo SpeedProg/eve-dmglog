@@ -230,13 +230,15 @@ class LogFileCreatorThread(Process):
         return f
 
 class Collector(object):
-    def __init__(self, userName, logfiles, testServer = False, liveServer = True):
+    def __init__(self, userName, logfiles, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
         self.testServer = testServer
         self.liveServer = liveServer
         self.userName = userName
         self.files = logfiles
         self.names = None
         self.values = None
+        self.start = startDateTime
+        self.end = endDateTime
     
     def skipfile(self, file):
         if (file.getCharacter() != self.userName):
@@ -247,7 +249,7 @@ class Collector(object):
             return True
     
     def skipmsg(self, msg):
-        return False
+        return  ((self.start != None and msg.datetime < self.start) or (self.end != None and msg.datetime > self.end))
 
     def getMsgList(self, file):
         return file.getMessagesInOrder()
@@ -333,8 +335,8 @@ class CollectorDamageOut(Collector):
 
 class CollectorDamageOutWeapon(Collector):
     
-    def __init__(self, userName, weapon, logfiles, testServer = False, liveServer = True):
-        Collector.__init__(self, userName, logfiles, testServer, liveServer)
+    def __init__(self, userName, weapon, logfiles, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
+        Collector.__init__(self, userName, logfiles, testServer, liveServer, startDateTime, endDateTime)
         self.weapon = weapon
 
     def getKey(self, msg):
