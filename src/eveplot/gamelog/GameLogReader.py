@@ -8,6 +8,8 @@ import os
 import re
 import datetime
 from html.parser import HTMLParser
+from typing import List, Optional, Sequence, Any, Tuple, Dict
+
 import matplotlib.pyplot as plt
 import numpy as np
 from profilehooks import profile
@@ -18,7 +20,8 @@ import time, pickle
 import json
 from matplotlib.cbook import todatetime
 
-def escapeLaTeX(tech):
+
+def escape_latex(tech):
     tech = tech.replace("\\", "\\textbackslash")
     tech = tech.replace("^", "\\textasciicircum")
     tech = tech.replace("~", "\\textasciitilde")
@@ -27,36 +30,41 @@ def escapeLaTeX(tech):
         tech = tech.replace(es, '\\'+es)
     return tech
 
+
 class GameLog(object):
-    '''
-    classdocs
-    '''
+    """
+    Represents a folder with game logs
+    """
     __an_con_count = 4
 
-    def __init__(self, logPath):
+    def __init__(self, log_path: str) -> None:
         '''
-        Constructor
+        Sets the path of the folder that contains the game logs
+        to actually load data call
+        load_data_from_logs afterwards if this is the invital parse
+        or
+        load_from_file if parsed logs where saved with save_to_file
         '''
-        self.__consumer_threads = []
+        self.__consumer_threads: List[LogFileCreatorThread] = []
 
-        self.parsedLogFiles = []
-        self.rawlogQueue = JoinableQueue(maxsize=100)
-        self.parsedLogsQueue = JoinableQueue(maxsize=100)
+        self.parsedLogFiles: List[ParsedLogFile] = []
+        self.rawlogQueue: JoinableQueue = JoinableQueue(maxsize=100)
+        self.parsedLogsQueue: JoinableQueue = JoinableQueue(maxsize=100)
 
-        self.logPath = logPath
+        self.logPath: str = log_path
 
-    def loadDataFromLogs(self):
+    def load_data_from_logs(self):
         start = time.time()
-        self.initConsumer()
+        self.__init_consumer()
         self.statusThread = StatusThread(self.parsedLogsQueue, self.rawlogQueue)
         self.statusThread.start()
         # start a monitor thread
-        self.loadLogs()
-        self.stopConsumer()
+        self.__load_logs()
+        self.__stop_consumer()
         end = time.time()
         print(("Took", (end-start)))
 
-    def initConsumer(self):
+    def __init_consumer(self):
         
         for i in range(self.__an_con_count):
             t = LogFileCreatorThread(self.rawlogQueue, self.parsedLogsQueue, "dec"+str(i))
@@ -68,7 +76,7 @@ class GameLog(object):
         self.__consumer_threads.append(t)
         print("All consumer started!")
 
-    def stopConsumer(self):
+    def __stop_consumer(self):
         print("Trying to join RawLogQueue")
         self.rawlogQueue.join()
         print("Trying to join parsedLogsQueue")
@@ -87,7 +95,7 @@ class GameLog(object):
 
         self.statusThread.stop()
 
-    def loadLogs(self):
+    def __load_logs(self):
         '''
         Load all the logfiles data into memory
         '''
@@ -96,32 +104,43 @@ class GameLog(object):
         files.sort()
 
         numfiles = len(files)
+        print(F"Found {numfiles} files")
         for idx, filename in enumerate(files):
             
             filepath = os.path.join(self.logPath, filename)
             #print("reading: ", idx, "/", numfiles, "path:", filepath)
-            self.load(filepath)
+            self.__load(filepath)
             if idx % 500 == 0:
                 print((idx, "/", numfiles, "loaded"))
         
         
     #@profile
-    def load(self, path):
-        data = open(path, "rb").read()
+    def __load(self, path):
+        data: bytes = open(path, "rb").read()
         self.rawlogQueue.put(RawLog(path, data))
     
-    def save_to_file(self, path):
-        #with open(path+".json", 'w') as output:
-        #    json.dump(self.parsedLogFiles, output, cls=UtilEncoder)
+    def save_to_file(self, path: str) -> None:
+        """
+        Save data to a pickle file, so we don't need to parse logfiles anymore
+        :param path: the path of the pickel file
+        :return: None
+        """
         with open(path, 'wb') as output:
             pickle.dump(self.parsedLogFiles, output, pickle.HIGHEST_PROTOCOL)
     
-    def load_from_file(self, path):
+    def load_from_file(self, path: str) -> None:
         with open(path, 'rb') as inf:
             self.parsedLogFiles = pickle.load(inf)
-        
 
-    def showGraph(self, name, aspic = False):
+    @staticmethod
+    def show_graph(self, name: str, aspic: bool = False) -> None:
+        """
+        Opens a matplotlib graph with graphs for
+        DamageIn, DamageOut, EwarIn, EwarOut, EwarOnOthers, MissesIn, MissesOut
+        :param name: Name of the Character to show the graphs for
+        :param aspic: save as pic instead of opening a window
+        :return: None
+        """
         collectors = []
         collectors.append(CollectorDamageIn(name, self.parsedLogFiles))
         collectors.append(CollectorDamageOut(name, self.parsedLogFiles))
@@ -131,19 +150,25 @@ class GameLog(object):
         collectors.append(CollectorMissIn(name, self.parsedLogFiles))
         collectors.append(CollectorMissOut(name, self.parsedLogFiles))
         
-        self.showGraphForCollectors(collectors, aspic)
+        GameLog.show_graph_for_collectors(collectors, aspic)
 
-    def showGraphForCollectors(self, collectors, aspic):
-        
-        graphcount = len(collectors)
+    @staticmethod
+    def show_graph_for_collectors(collectors: List[Collector], aspic: bool) -> None:
+        """
+        Display graphs for a list of collectors
+        :param collectors: the list of collectors to use
+        :param aspic: save as picture instead of opening a window
+        :return: None
+        """
+        graph_count: int = len(collectors)
         plt.switch_backend('TkAgg')
         
-        if (aspic):
+        if aspic:
             for idx, collector in enumerate(collectors):
                 print((str(idx), collector.__class__.__name__))
                 fig, plot = plt.subplots(1)
     
-                names, values =  collector.getData()
+                names, values =  collector.get_data()
                 nCount = len(names)
                 print(("Enitiy Count", nCount))
                 if nCount <= 0:
@@ -153,10 +178,10 @@ class GameLog(object):
                 for tick in plot.yaxis.get_major_ticks():
                     tick.label.set_fontsize(6)
                 rects = plot.barh(ind, values, 0.7, color='r', linewidth=0)
-                plot.set_xlabel(collector.getXLabel(names, values))
+                plot.set_xlabel(collector.get_label_x(names, values))
                 plot.set_yticks(ind)
                 # filternames bc labels are resticted LaTeX
-                names = [escapeLaTeX(name) for name in names]
+                names = [escape_latex(name) for name in names]
                 plot.set_yticklabels(names)
                 for rect in rects:
                     height = rect.get_height()
@@ -167,36 +192,36 @@ class GameLog(object):
 
                 fig.savefig(collector.__class__.__name__+".png", format="png", dpi=100)
         else:
-            fig, plots = plt.subplots(graphcount)
-            if graphcount <= 1:
+            fig, plots = plt.subplots(graph_count)
+            if graph_count <= 1:
                 idx = 0
                 plot = plots
     
                 collector = collectors[0]
-                names, values =  collector.getData()
+                names, values =  collector.get_data()
                 fig.set_size_inches(10, len(values)/2)
                 ind = np.arange(len(values))
                 for tick in plot.yaxis.get_major_ticks():
                     tick.label.set_fontsize(6)
                 rects = plot.barh(ind, values, 0.5, color='r')
-                plot.set_xlabel(collector.getXLabel(names, values))
+                plot.set_xlabel(collector.get_label_x(names, values))
                 plot.set_yticks(ind)
                 plot.set_yticklabels(names, fontsize=5)
                 for rect in rects:
                     height = rect.get_height()
                     width = rect.get_width()
                     plot.text(1.05*width, rect.get_y() + height/2.,
-                            '%d' % int(width),
-                            ha='left', va='center', size='10')
+                              f'{width}',
+                              ha='left', va='center', size='10')
             else:
                 for idx, plot in enumerate(plots):
                     collector = collectors[idx]
-                    names, values =  collector.getData()
+                    names, values =  collector.get_data()
                     ind = np.arange(len(values))
                     for tick in plot.yaxis.get_major_ticks():
                         tick.label.set_fontsize(6)
                     rects = plot.barh(ind, values, 0.5, color='r')
-                    plot.set_xlabel(collector.getXLabel(names, values))
+                    plot.set_xlabel(collector.get_label_x(names, values))
                     plot.set_yticks(ind)
                     plot.set_yticklabels(names)
                     for rect in rects:
@@ -208,16 +233,27 @@ class GameLog(object):
             plt.show()
 
 class LogFileCreatorThread(Process):
-    def __init__(self, tasks, results, name):
+    """
+    Thread that creates a ParsedLogfile out of raw log file text
+    """
+    def __init__(self, tasks: JoinableQueue, results: JoinableQueue, name: str) -> None:
+        """
+        Initiate the consumer process telling it a queue to get task from and
+        one to deliver results too
+        and give it a name to identify it
+        :param tasks: queue to get tasks from
+        :param results:  queue to deliver results to
+        :param name: process name
+        """
         Process.__init__(self, daemon=True)
-        self.__tasks = tasks
-        self.__results = results
+        self.__tasks: JoinableQueue = tasks
+        self.__results: JoinableQueue = results
         self.name = name
         self.__out_dict = dict()
 
-    def run(self):
+    def run(self) -> None:
         while True:
-            work = self.__tasks.get()
+            work: RawLog = self.__tasks.get()
             if work is None:
                 break
             self.__out_dict = dict()
@@ -226,12 +262,17 @@ class LogFileCreatorThread(Process):
             self.__tasks.task_done()
             #print(self.name, "decoded")
     
-    def createLogfile(self, work):
+    def createLogfile(self, work: RawLog) -> ParsedLogFile:
         f = ParsedLogFile(work.filepath, work.data)
         return f
 
+
 class DPSCollector(object):
-    def __init__(self, userName, logfiles, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
+    """
+    A collector to display DPS graphs
+    this is not finished
+    """
+    def __init__(self, userName: str, logfiles, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
         self.testServer = testServer
         self.liveServer = liveServer
         self.userName = userName
@@ -252,7 +293,7 @@ class DPSCollector(object):
 
             messageList = self.getMsgList(file)
             for msg in messageList:
-                if (self.skipmsg(msg)):
+                if self.skipmsg(msg):
                     continue
                 if msg.datetime < self.msgStartDate:
                     self.msgStartDate = msg.datetime
@@ -260,7 +301,7 @@ class DPSCollector(object):
                     self.msgEndDate = msg.datetime
         
     def skipfile(self, file):
-        if (file.getCharacter() != self.userName):
+        if file.get_character() != self.userName:
             return True
         if file.is_testserver and not self.testServer:
             return True
@@ -271,7 +312,7 @@ class DPSCollector(object):
         return  ((self.start != None and msg.datetime < self.start) or (self.end != None and msg.datetime > self.end))
 
     def getMsgList(self, file):
-        return file.getMessagesInOrder()
+        return file.get_messages_in_order()
     
     def getNewValue(self, target, oldval):
         return oldval+1
@@ -313,19 +354,25 @@ class DPSCollector(object):
 
         return names, values
 
+
 class Collector(object):
-    def __init__(self, userName, logfiles, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
-        self.testServer = testServer
-        self.liveServer = liveServer
-        self.userName = userName
-        self.files = logfiles
-        self.names = None
-        self.values = None
-        self.start = startDateTime
-        self.end = endDateTime
+    """
+    Base collector class that every other collector should inherit from
+    implements some basic features and checks that are usefull everywhere
+    """
+    def __init__(self, user_name: str, log_files: Sequence[ParsedLogFile], test_server: bool = False, live_server: bool = True,
+                 start_date_time: Optional[datetime] = None, end_date_time: Optional[datetime] = None):
+        self.testServer: bool = test_server
+        self.liveServer: bool = live_server
+        self.userName: str = user_name
+        self.files: Sequence[ParsedLogFile] = log_files
+        self.names: Optional[List[str]] = None
+        self.values: Optional[List[int]] = None
+        self.start: datetime = start_date_time
+        self.end: datetime = end_date_time
     
     def skipfile(self, file):
-        if (file.getCharacter() != self.userName):
+        if file.get_character() != self.userName:
             return True
         if file.is_testserver and not self.testServer:
             return True
@@ -333,22 +380,39 @@ class Collector(object):
             return True
     
     def skipmsg(self, msg):
-        return  ((self.start != None and msg.datetime < self.start) or (self.end != None and msg.datetime > self.end))
+        return (self.start is not None and msg.datetime < self.start) or (self.end is not None and msg.datetime > self.end)
 
-    def getMsgList(self, file):
-        return file.getMessagesInOrder()
+    def get_msg_list(self, file):
+        return file.get_messages_in_order()
     
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target: ParsedLogMessage, oldval: int):
+        """
+        Defines how to get a new value from the old value and a target
+        should be overriden by child collectors
+        default just does return oldval+1
+        """
         return oldval+1
     
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values) -> str:
         return "Undefined"
     
-    def getKey(self, msg):
+    def get_key(self, msg: ParsedLogMessage) -> Any:
+        """
+        Get the key relevant for this collector from a ParsedLogMessage
+        should be overriden by child classes
+        :param msg: a ParsedLogMessage to get the key from
+        :return: Any key
+        """
         return msg.data.source
     
-    def getData(self):
-        if (self.names is not None and self.values is not None):
+    def get_data(self) -> Tuple[List[str], List[int]]:
+        """
+        Get collected data from this collector
+        Child classes can but don't need to override this
+        it is a generic collection function that uses get_label_x get_key and get_new_value to create data
+        :return: tuple of y-axis names and x-axis values
+        """
+        if self.names is not None and self.values is not None:
             return self.names, self.values
 
         comdata = dict()
@@ -356,16 +420,16 @@ class Collector(object):
             if (self.skipfile(file)):
                 continue
 
-            messageList = self.getMsgList(file)
+            messageList = self.get_msg_list(file)
             for msg in messageList:
                 if (self.skipmsg(msg)):
                     continue
                 dmg = None
-                key = self.getKey(msg)
+                key = self.get_key(msg)
                 if key not in comdata:
-                    dmg = self.getNewValue(msg, 0)
+                    dmg = self.get_new_value(msg, 0)
                 else:
-                    dmg = self.getNewValue(msg, comdata[key])
+                    dmg = self.get_new_value(msg, comdata[key])
                 comdata[key] = dmg
         
         values = [int(key) for key in list(comdata.values())]
@@ -377,199 +441,207 @@ class Collector(object):
 
         return names, values
 
+
 class CollectorDamageIn(Collector):
     
-    def getKey(self, msg):
+    def get_key(self, msg):
         return msg.data.source
     
-    def getMsgList(self, file):
-        return file.getMessagesByType('combat')
+    def get_msg_list(self, file):
+        return file.get_messages_by_type('combat')
 
     def skipmsg(self, msg):
         return Collector.skipmsg(self, msg) or not (msg.data.type == 'dmg' and msg.data.direction == 'from' and msg.data.target == 'self')
 
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target, oldval):
         return oldval + target.data.effect
 
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values):
         total = 0
         for count in values:
             total += count
         return self.userName + " Received Damge Total = " + str(total)
 
+
 class CollectorDamageOut(Collector):
     
-    def getKey(self, msg):
+    def get_key(self, msg):
         return msg.data.target
     
-    def getMsgList(self, file):
-        return file.getMessagesByType('combat')
+    def get_msg_list(self, file):
+        return file.get_messages_by_type('combat')
 
     def skipmsg(self, msg):
         return Collector.skipmsg(self, msg) or not (msg.data.type == 'dmg' and msg.data.direction == "to" and msg.data.source == "self")
 
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target, oldval):
         return oldval + target.data.effect
 
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values):
         total = 0
         for count in values:
             total += count
         return self.userName + " Dealt Damge Total = " + str(total)
 
+
 class CollectorDamageOutWeapon(Collector):
     
-    def __init__(self, userName, weapon, logfiles, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
-        Collector.__init__(self, userName, logfiles, testServer, liveServer, startDateTime, endDateTime)
+    def __init__(self, userName, weapon, log_files, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
+        Collector.__init__(self, userName, log_files, testServer, liveServer, startDateTime, endDateTime)
         self.weapon = weapon
 
-    def getKey(self, msg):
+    def get_key(self, msg):
         return msg.data.target
     
-    def getMsgList(self, file):
-        return file.getMessagesByType('combat')
+    def get_msg_list(self, file):
+        return file.get_messages_by_type('combat')
 
     def skipmsg(self, msg):
         return Collector.skipmsg(self, msg) or not (msg.data.type == 'dmg' and msg.data.direction == "to" and msg.data.source == "self" and msg.data.weapon == self.weapon)
 
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target, oldval):
         return oldval + target.data.effect
 
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values):
         total = 0
         for count in values:
             total += count
         return self.userName + " Dealt Damage with " + self.weapon + " Total = " + str(total)
 
+
 class CollectorDamageOutWeapons(Collector):
     
-    def __init__(self, userName, weapons, logfiles, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
-        Collector.__init__(self, userName, logfiles, testServer, liveServer, startDateTime, endDateTime)
+    def __init__(self, userName, weapons, log_files, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
+        Collector.__init__(self, userName, log_files, testServer, liveServer, startDateTime, endDateTime)
         '''takes weapons seperated by | or "all" to allow all weapons '''
         self.weapons = weapons.split('|')
 
-    def getKey(self, msg):
+    def get_key(self, msg):
         return msg.data.target
     
-    def getMsgList(self, file):
-        return file.getMessagesByType('combat')
+    def get_msg_list(self, file):
+        return file.get_messages_by_type('combat')
 
     def skipmsg(self, msg):
         return Collector.skipmsg(self, msg) or not (msg.data.type == 'dmg' and msg.data.direction == "to" and msg.data.source == "self" and ( "all" in self.weapons or msg.data.weapon in self.weapons ))
 
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target, oldval):
         return oldval + target.data.effect
 
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values):
         total = 0
         for count in values:
             total += count
         return self.userName + " Dealt Damage with " + self.weapon + " Total = " + str(total)
 
 
-
 class CollectorMissIn(Collector):
     
-    def getKey(self, msg):
+    def get_key(self, msg):
         return msg.data.source
     
-    def getMsgList(self, file):
-        return file.getMessagesByType('combat')
+    def get_msg_list(self, file):
+        return file.get_messages_by_type('combat')
 
     def skipmsg(self, msg):
         return Collector.skipmsg(self, msg) or not (msg.data.type == 'miss' and msg.data.direction == 'from' and msg.data.target == 'self')
 
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target, oldval):
         return oldval + 1
 
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values):
         total = 0
         for count in values:
             total += count
         return "Number of Misses On Me Total = " + str(total)
 
+
 class CollectorMissOut(Collector):
     
-    def getKey(self, msg):
+    def get_key(self, msg):
         return msg.data.target
     
-    def getMsgList(self, file):
-        return file.getMessagesByType('combat')
+    def get_msg_list(self, file):
+        return file.get_messages_by_type('combat')
 
     def skipmsg(self, msg):
         return Collector.skipmsg(self, msg) or not (msg.data.type == 'miss' and msg.data.direction == 'to' and msg.data.source == 'self')
 
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target, oldval):
         return oldval + 1
 
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values):
         total = 0
         for count in values:
             total += count
         return "Number of Misses By Me Total = " + str(total)
 
+
 class CollectorEwarOutOthers(Collector):
     
-    def getKey(self, msg):
+    def get_key(self, msg):
         return msg.data.source + ' => ' + msg.data.target
     
-    def getMsgList(self, file):
-        return file.getMessagesByType('combat')
+    def get_msg_list(self, file):
+        return file.get_messages_by_type('combat')
 
     def skipmsg(self, msg):
         return Collector.skipmsg(self, msg) or not (msg.data.type == 'ewar' and msg.data.target != 'self' and msg.data.source != 'self')
 
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target, oldval):
         return oldval + 1
 
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values):
         total = 0
         for count in values:
             total += count
         return "Ewar attempts done between others total = " + str(total)
 
+
 class CollectorEwarIn(Collector):
 
-    def getKey(self, msg):
+    def get_key(self, msg):
         return msg.data.source
 
-    def getMsgList(self, file):
-        return file.getMessagesByType('combat')
+    def get_msg_list(self, file):
+        return file.get_messages_by_type('combat')
 
     def skipmsg(self, msg):
         return Collector.skipmsg(self, msg) or not (msg.data.type == 'ewar' and msg.data.target == 'self')
 
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target, oldval):
         return oldval + 1
 
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values):
         total = 0
         for count in values:
             total += count
         return "Ewar attempts on me total = " + str(total)
 
+
 class CollectorEwarOut(Collector):
 
-    def getKey(self, msg):
+    def get_key(self, msg):
         return msg.data.target
 
-    def getMsgList(self, file):
-        return file.getMessagesByType('combat')
+    def get_msg_list(self, file):
+        return file.get_messages_by_type('combat')
 
     def skipmsg(self, msg):
         return Collector.skipmsg(self, msg) or not (msg.data.type == 'ewar' and msg.data.source == 'self')
 
-    def getNewValue(self, target, oldval):
+    def get_new_value(self, target, oldval):
         return oldval + 1
 
-    def getXLabel(self, names, values):
+    def get_label_x(self, names, values):
         total = 0
         for count in values:
             total += count
         return "Ewar attempts by me total = " + str(total)
 
+
 class StatusThread(threading.Thread):
-    def __init__(self, parsedLogQueues, rawLogQueue):
+    def __init__(self, parsedLogQueues: JoinableQueue, rawLogQueue: JoinableQueue):
         threading.Thread.__init__(self, daemon=True)
         self.__parsedLogQueues = parsedLogQueues
         self.__rawLogQueue = rawLogQueue
@@ -587,20 +659,22 @@ class StatusThread(threading.Thread):
     def stopped(self):
         return self._stop.isSet()
 
+
 class AppendLogfileThread(threading.Thread):
-    def __init__(self, tasks, results):
+    def __init__(self, tasks: JoinableQueue, results: List[ParsedLogFile]):
         threading.Thread.__init__(self)
-        self.__tasks = tasks
-        self.__results = results
+        self.__tasks: JoinableQueue = tasks
+        self.__results: JoinableQueue = results
     
     def run(self):
         while True:
-            work = self.__tasks.get()
+            work: Optional[ParsedLogFile] = self.__tasks.get()
             if work is None:
                 print("All Files added")
                 break
             self.__results.append(work)
             self.__tasks.task_done()
+
 
 class MessageAddThread(threading.Thread):
     def __init__(self, in_dicts, user):
@@ -638,69 +712,76 @@ class MessageAddThread(threading.Thread):
                 dest_target_data[target_key] = oldDmg + in_target_data[target_key]
 
 class RawLog(object):
-    def __init__(self, path, data):
-        self.filepath = path
-        self.data = data
+    """
+    Hold the raw log data, as the content as bytes
+    and the path as string
+    only used as a container to pass on to threads
+    """
+    def __init__(self, path: str, data: bytes):
+        self.filepath: str = path
+        self.data: bytes = data
+
 
 class ParsedLogFile(object):
-    __sanshas = {'Deltole Tegmentum' : None, 'Renyn Meten' : None, 'Tama Cerebellum' : None, 'Ostingele Tectum' : None, 'Vylade Dien' : None, 'Antem Neo' : None, 'Eystur Rhomben' : None, 'Auga Hypophysis' : None, 'True Power Mobile Headquarters' : None, 'Outuni Mesen' : None, 'Mara Paleo' : None, 'Yulai Crus Cerebi' : None, 'Romi Thalamus' : None, 'Intaki Colliculus' : None, 'Uitra Telen' : None, 'Schmaeel Medulla' : None, 'Arnon Epithalamus' : None,
+    __sanshas: Dict[str, None] = {'Deltole Tegmentum' : None, 'Renyn Meten' : None, 'Tama Cerebellum' : None, 'Ostingele Tectum' : None, 'Vylade Dien' : None, 'Antem Neo' : None, 'Eystur Rhomben' : None, 'Auga Hypophysis' : None, 'True Power Mobile Headquarters' : None, 'Outuni Mesen' : None, 'Mara Paleo' : None, 'Yulai Crus Cerebi' : None, 'Romi Thalamus' : None, 'Intaki Colliculus' : None, 'Uitra Telen' : None, 'Schmaeel Medulla' : None, 'Arnon Epithalamus' : None,
                  'Sansha\'s Nation Commander' : None, 'Sansha Battletower' : None }
-    __firstLine =   "-"
-    __secondLine =  "  Gamelog"
-    __thridLine =   "  Listener:"
-    __forthLine =   "  Session Started:"
-    __fifthLine =   "-"
-    __msg_start = "[ "
+    "Dict containing all the rats that we should pay attention too"
+    __firstLine: str = "-"
+    __secondLine: str = "  Gamelog"
+    __thridLine: str = "  Listener:"
+    __forthLine: str = "  Session Started:"
+    __fifthLine: str = "-"
+    __msg_start: str = "[ "
     __re_start_time = re.compile("^  Session Started: (\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2})\r$")
     __re_listener = re.compile("^  Listener: (.*)\r$")
     
-    def __init__(self, filepath, data):
+    def __init__(self, filepath: str, data: bytes) -> None:
         print(("reading", filepath))
-        self.__messages = []
-        self.__status = -1
-        self.__start_datetime = None
-        self.__listener = None
-        self.__filepath = filepath
+        self.__messages: List[ParsedLogMessage] = []
+        self.__status: int = -1
+        self.__start_datetime: Optional[datetime] = None
+        self.__listener: Optional[str] = None
+        self.__filepath: str = filepath
         self.__status = self.__readFile(data)
-        self.is_testserver = False
+        self.is_testserver: bool = False
 
 
-    def __readFile(self, data):
-        '''
+    def __readFile(self, data: bytes) -> int:
+        """
         Returns __status: 0 = ok, 2 file useless, 1 file invalid
-        '''
+        """
         file = data.replace(b"\xff\xfe", b"").decode("utf_8")
         file = io.StringIO(file)
 
-        currentLine = file.readline()
+        current_line = file.readline()
         '''
         Check first line
         '''
-        if not currentLine.startswith(self.__firstLine):
+        if not current_line.startswith(self.__firstLine):
 
-            # #print("startline>>"+currentLine+"<<")
+            # #print("startline>>"+current_line+"<<")
             return 1;
 
-        currentLine = file.readline()
-        if not currentLine.startswith(self.__secondLine) :
-            # #print("typeline>>"+currentLine+"<<")
+        current_line = file.readline()
+        if not current_line.startswith(self.__secondLine) :
+            # #print("typeline>>"+current_line+"<<")
             return 1;
 
-        currentLine = file.readline()
-        if not currentLine.startswith(self.__thridLine):
-            # #print("listener>>"+currentLine+"<<")
+        current_line = file.readline()
+        if not current_line.startswith(self.__thridLine):
+            # #print("listener>>"+current_line+"<<")
             return 2;
         else: # extracting character name of the listener
-            m = self.__re_listener.match(currentLine)
+            m = self.__re_listener.match(current_line)
             self.__listener = m.group(1)
 
-        currentLine = file.readline()
-        if not currentLine.startswith(self.__forthLine):
-            # #print("session>>"+currentLine+"<<")
+        current_line = file.readline()
+        if not current_line.startswith(self.__forthLine):
+            # #print("session>>"+current_line+"<<")
             return 2;
         else:
             # parse the session start
-            m = self.__re_start_time.match(currentLine)
+            m = self.__re_start_time.match(current_line)
             if (m != None):
                 self.__start_datetime = datetime.datetime(
                                int(m.group(1)), int(m.group(2)), int(m.group(3)),
@@ -708,32 +789,32 @@ class ParsedLogFile(object):
                                datetime.timezone(datetime.timedelta(0))
                                )
 
-        currentLine = file.readline()
-        if not currentLine.startswith(self.__fifthLine):
-            #print("endline>>"+currentLine+"<<")
-            return 2;
+        current_line = file.readline()
+        if not current_line.startswith(self.__fifthLine):
+            #print("endline>>"+current_line+"<<")
+            return 2
 
-        msg = self.__getNextMessage(file)
+        msg: str = self.__getNextMessage(file)
         if '<h4> Available systems</h4>' in msg:
             self.is_testserver = True
-        while (msg != ''):
+        while msg != '':
 #           print("msg>", msg)
-            parsedMessage = ParsedLogMessage(msg)
-            if parsedMessage.data != None: # it has a supported type
+            parsedMessage: ParsedLogMessage = ParsedLogMessage(msg)
+            if parsedMessage.data is not None: # it has a supported type
                 #if (parsedMessage.data.target == 'self' and parsedMessage.data.source in self.__sanshas) or parsedMessage.data.target in self.__sanshas:
                 self.__addMessage(parsedMessage)
             
             msg = self.__getNextMessage(file)
         return 0
 
-    def __getNextMessage(self, file):
+    def __getNextMessage(self, file) -> str:
         msg = ""
         line = file.readline()
 #        #print("check msg start:", line)
         if not line.startswith(self.__msg_start) :
-#            #print('not msg start')
-            return "";
-        msg += line;
+#            print('not msg start')
+            return ""
+        msg += line
 #        #print("start msg>", line)
         '''
         If we land here this line was the msg start
@@ -760,12 +841,12 @@ class ParsedLogFile(object):
         #print("Msg", msg)
         return msg
 
-    def __addMessage(self, msg):
+    def __addMessage(self, msg: ParsedLogMessage) -> None:
         #print("Adding to LogFile", msg.type, msg)
         self.__messages.append(msg) # add message by order
 
-    def printMessagesByType(self, msg_type):
-        msgSByType = self.getMessagesByType()
+    def print_messages_by_type(self, msg_type: str) -> None:
+        msgSByType = self.get_messages_by_type()
         if msg_type in msgSByType:
             for msg in msgSByType[msg_type]:
                 print(msg)
@@ -774,7 +855,7 @@ class ParsedLogFile(object):
             print(("No messages of this msg_type="+msg_type))
             pass
 
-    def getMessagesByType(self, msg_type = None):
+    def get_messages_by_type(self, msg_type = None):
         # sort them into types
         messagesByType = dict()
         if (msg_type == None):
@@ -787,48 +868,48 @@ class ParsedLogFile(object):
             return messagesByType
         
         # else only sort those in that are of this type
-        messagesForType = []
+        messages_for_type = []
         for msg in self.__messages:
             if msg.type == msg_type:
-                messagesForType.append(msg)
+                messages_for_type.append(msg)
         
-        return messagesForType
+        return messages_for_type
 
-    def getTypes(self):
-        return list(self.__messagesByType.keys())
-
-    def getStatus(self):
+    def get_status(self):
         return self.__status
 
-    def getCharacter(self):
+    def get_character(self):
         return self.__listener
 
-    def getFilepath(self):
+    def get_filepath(self):
         return self.__filepath
 
-    def getMessagesInOrder(self):
+    def get_messages_in_order(self):
         return self.__messages
 
-class ParsedLogMessage(object):
 
+class ParsedLogMessage(object):
+    """
+    Containes parsed data about a log message
+    """
     __regLine = re.compile("^\[ (\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2}) \] \((\w*)\) (.*)", re.S)
 
     def __init__(self, text):
-        self.type = None
-        self.datetime = None
-        self.data = None
+        self.type: Optional[str] = None
+        self.datetime: Optional[datetime] = None
+        self.data: Optional[CombatMessage] = None
         self.parseMessage(text)
 
-    def parseMessage(self, text):
-        matchLine = self.__regLine.search(text)
+    def parseMessage(self, text: str) -> None:
+        match_line = self.__regLine.search(text)
 
-        self.datetime = datetime.datetime(int(matchLine.group(1)), int(matchLine.group(2)), int(matchLine.group(3)),
-                                           int(matchLine.group(4)), int(matchLine.group(5)), int(matchLine.group(6)), 0,
+        self.datetime = datetime.datetime(int(match_line.group(1)), int(match_line.group(2)), int(match_line.group(3)),
+                                           int(match_line.group(4)), int(match_line.group(5)), int(match_line.group(6)), 0,
                                             datetime.timezone(datetime.timedelta(0))
                                             )
 
-        self.type = matchLine.group(7)
-        msgText = matchLine.group(8)
+        self.type = match_line.group(7)
+        msgText = match_line.group(8)
         if self.type == 'combat':
             self.data = CombatMessageParserSimple.parse(msgText)
         else:
@@ -837,6 +918,7 @@ class ParsedLogMessage(object):
 
     def __str__(self):
         return self.data
+
 
 class CombatMessageParserHTML(HTMLParser):
 
@@ -902,15 +984,19 @@ class CombatMessageParserHTML(HTMLParser):
     def getTarget(self):
         return self.target
 
+
 class CombatMessage(object):
+    """
+    Contains data about a single combat message
+    """
     def __init__(self):
-        self.type = None
-        self.effect = None
-        self.direction = None
-        self.source = None
-        self.target = None
-        self.weapon = None
-        self.quality = None
+        self.type: Optional[str] = None
+        self.effect: Optional[str] = None # "Warp scramble attempt" | ... other dynamic values parsed from msg
+        self.direction: Optional[str] = None # "from" | "to"
+        self.source: Optional[str] = None # name of the guy doing the combat action
+        self.target: Optional[str] = None # name of the guy that is target of the combat action
+        self.weapon: Optional[str] = None # name of the weapon system used e.g. "Gecko"
+        self.quality: Optional[str] = None # name of hit quality e.g. "Smashes"
         
     def __repr__(self):
         sb = []
@@ -918,21 +1004,22 @@ class CombatMessage(object):
             sb.append("{key}={value}".format(key=key, value=self.__dict__[key]))
  
         return ', '.join(sb)
-        
+
+
 class CombatMessageParserSimple(object):
     __re_dmg = re.compile("^\s*(\d*)$")
     __re_scram = re.compile("<color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b>(.*)</b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font>(.*)\r")
     __re_dmg_in = re.compile("<color=0xffcc0000><b>(\d*)</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xffffffff>(.*)</b><font size=10><color=0x77ffffff>(.*)\r")
-    __re_miss_in = re.compile("(.*) misses you completely\r");
+    __re_miss_in = re.compile("(.*) misses you completely\r")
     __re_dmg_out = re.compile("<color=0xff00ffff><b>(?P<dmg>.*)</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>(?P<target>.*)</b><font size=10><color=0x77ffffff> - (?P<weapon>.*) - (?P<quality>.*)\r")
     __re_miss_group = re.compile("Your group of (.*) misses (.*) completely - (.*)\r")
     __re_miss_drone = re.compile("Your (.*) misses (.*) completely - (.*)\r")
 
     @staticmethod
-    def parse(txt):
+    def parse(txt) -> Optional[CombatMessage]:
         msg = CombatMessage()
         groups = CombatMessageParserSimple.__re_scram.match(txt)
-        if groups != None:
+        if groups is not None:
             msg.type = "ewar"
             msg.effect = "Warp scramble attempt"
             msg.direction = "from"
@@ -945,7 +1032,7 @@ class CombatMessageParserSimple(object):
             return msg
 
         groups = CombatMessageParserSimple.__re_dmg_in.match(txt)
-        if groups != None:
+        if groups is not None:
             msg.type = "dmg"
             msg.effect = int(groups.group(1))
             msg.direction = "from"
@@ -956,7 +1043,7 @@ class CombatMessageParserSimple(object):
             return msg
 
         groups = CombatMessageParserSimple.__re_miss_in.match(txt)
-        if groups != None:
+        if groups is not None:
             msg.type = "miss"
             msg.effect = None
             msg.direction = "from"
@@ -967,7 +1054,7 @@ class CombatMessageParserSimple(object):
             return msg
 
         groups = CombatMessageParserSimple.__re_dmg_out.match(txt)
-        if groups != None:
+        if groups is not None:
             msg.type = "dmg"
             msg.effect = int(groups.group('dmg'))
             msg.direction = "to"
@@ -978,7 +1065,7 @@ class CombatMessageParserSimple(object):
             return msg
 
         groups = CombatMessageParserSimple.__re_miss_group.match(txt)
-        if groups != None:
+        if groups is not None:
             msg.type = "miss"
             msg.effect = None
             msg.direction = "to"
@@ -989,7 +1076,7 @@ class CombatMessageParserSimple(object):
             return msg
 
         groups = CombatMessageParserSimple.__re_miss_drone.match(txt)
-        if groups != None:
+        if groups is not None:
             msg.type = "miss drone"
             msg.effect = 1
             msg.source = groups.group(1)
@@ -1000,6 +1087,7 @@ class CombatMessageParserSimple(object):
             return msg
         
         return None
+
 
 class UtilEncoder(json.JSONEncoder):
     def default(self, obj):
