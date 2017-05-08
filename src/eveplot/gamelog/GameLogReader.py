@@ -54,7 +54,7 @@ class GameLog(object):
         self.loadLogs()
         self.stopConsumer()
         end = time.time()
-        print("Took", (end-start))
+        print(("Took", (end-start)))
 
     def initConsumer(self):
         
@@ -102,7 +102,7 @@ class GameLog(object):
             #print("reading: ", idx, "/", numfiles, "path:", filepath)
             self.load(filepath)
             if idx % 500 == 0:
-                print(idx, "/", numfiles, "loaded")
+                print((idx, "/", numfiles, "loaded"))
         
         
     #@profile
@@ -140,12 +140,12 @@ class GameLog(object):
         
         if (aspic):
             for idx, collector in enumerate(collectors):
-                print (str(idx), collector.__class__.__name__)
+                print((str(idx), collector.__class__.__name__))
                 fig, plot = plt.subplots(1)
     
                 names, values =  collector.getData()
                 nCount = len(names)
-                print("Enitiy Count", nCount)
+                print(("Enitiy Count", nCount))
                 if nCount <= 0:
                     continue
                 fig.set_size_inches(350, nCount/10)
@@ -304,8 +304,8 @@ class DPSCollector(object):
                     dmg = self.getNewValue(msg, comdata[key])
                 comdata[key] = dmg
         
-        values = [int(key) for key in comdata.values()]
-        names = [x for (_,x) in sorted(zip(values,[str(key) for key in comdata.keys()]), key=lambda pair: pair[0])]
+        values = [int(key) for key in list(comdata.values())]
+        names = [x for (_,x) in sorted(zip(values,[str(key) for key in list(comdata.keys())]), key=lambda pair: pair[0])]
         values.sort()
 
         self.names = names
@@ -368,8 +368,8 @@ class Collector(object):
                     dmg = self.getNewValue(msg, comdata[key])
                 comdata[key] = dmg
         
-        values = [int(key) for key in comdata.values()]
-        names = [x for (_,x) in sorted(zip(values,[str(key) for key in comdata.keys()]), key=lambda pair: pair[0])]
+        values = [int(key) for key in list(comdata.values())]
+        names = [x for (_,x) in sorted(zip(values,[str(key) for key in list(comdata.keys())]), key=lambda pair: pair[0])]
         values.sort()
 
         self.names = names
@@ -577,8 +577,8 @@ class StatusThread(threading.Thread):
         
     def run(self):
         while not self.stopped():
-            print("In rawLogQueue:", self.__rawLogQueue.qsize())
-            print("In parsedLogQueues:", self.__parsedLogQueues.qsize())
+            print(("In rawLogQueue:", self.__rawLogQueue.qsize()))
+            print(("In parsedLogQueues:", self.__parsedLogQueues.qsize()))
             time.sleep(1)
     
     def stop(self):
@@ -612,7 +612,7 @@ class MessageAddThread(threading.Thread):
         while True:
             work = self.__tasks.get()
             if work is None:
-                print("Final:", self.__out_dict)
+                print(("Final:", self.__out_dict))
                 break
             #print("Add to final:", work)
             self.work(work)
@@ -655,7 +655,7 @@ class ParsedLogFile(object):
     __re_listener = re.compile("^  Listener: (.*)\r$")
     
     def __init__(self, filepath, data):
-        print("reading", filepath)
+        print(("reading", filepath))
         self.__messages = []
         self.__status = -1
         self.__start_datetime = None
@@ -771,7 +771,7 @@ class ParsedLogFile(object):
                 print(msg)
                 pass
         else:
-            print("No messages of this msg_type="+msg_type)
+            print(("No messages of this msg_type="+msg_type))
             pass
 
     def getMessagesByType(self, msg_type = None):
@@ -795,7 +795,7 @@ class ParsedLogFile(object):
         return messagesForType
 
     def getTypes(self):
-        return self.__messagesByType.keys()
+        return list(self.__messagesByType.keys())
 
     def getStatus(self):
         return self.__status
