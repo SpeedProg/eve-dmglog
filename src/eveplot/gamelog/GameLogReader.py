@@ -16,6 +16,7 @@ from multiprocessing import JoinableQueue, Process
 import io
 import time, pickle
 import json
+from matplotlib.cbook import todatetime
 
 def escapeLaTeX(tech):
     tech = tech.replace("\\", "\\textbackslash")
@@ -228,6 +229,89 @@ class LogFileCreatorThread(Process):
     def createLogfile(self, work):
         f = ParsedLogFile(work.filepath, work.data)
         return f
+
+class DPSCollector(object):
+    def __init__(self, userName, logfiles, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
+        self.testServer = testServer
+        self.liveServer = liveServer
+        self.userName = userName
+        self.files = logfiles
+        self.names = None
+        self.values = None
+        self.start = startDateTime
+        self.end = endDateTime
+        self.msgStartDate = datetime.datetime.utcnow()
+        self.msgEndDate = datetime.datetime.utcnow()
+        
+        # find the min and max date of accepted dmg msgs
+        # so we can calculate our x axis from this
+        # y will be dps
+        for file in self.files:
+            if (self.skipfile(file)):
+                continue
+
+            messageList = self.getMsgList(file)
+            for msg in messageList:
+                if (self.skipmsg(msg)):
+                    continue
+                if msg.datetime < self.msgStartDate:
+                    self.msgStartDate = msg.datetime
+                if msg.datetime > self.msgEndDate:
+                    self.msgEndDate = msg.datetime
+        
+    def skipfile(self, file):
+        if (file.getCharacter() != self.userName):
+            return True
+        if file.is_testserver and not self.testServer:
+            return True
+        if not file.is_testserver and not self.liveServer:
+            return True
+    
+    def skipmsg(self, msg):
+        return  ((self.start != None and msg.datetime < self.start) or (self.end != None and msg.datetime > self.end))
+
+    def getMsgList(self, file):
+        return file.getMessagesInOrder()
+    
+    def getNewValue(self, target, oldval):
+        return oldval+1
+    
+    def getXLabel(self, names, values):
+        return "Undefined"
+    
+    def getKey(self, msg):
+        return msg.data.source
+    
+    def getData(self, fromDateTime, toDateTime):
+        if (self.names is not None and self.values is not None):
+            return self.names, self.values
+
+        comdata = dict()
+        for file in self.files:
+            if (self.skipfile(file)):
+                continue
+
+            messageList = self.getMsgList(file)
+            for msg in messageList:
+                if (self.skipmsg(msg)):
+                    continue
+                
+                dmg = None
+                key = self.getKey(msg)
+                if key not in comdata:
+                    dmg = self.getNewValue(msg, 0)
+                else:
+                    dmg = self.getNewValue(msg, comdata[key])
+                comdata[key] = dmg
+        
+        values = [int(key) for key in comdata.values()]
+        names = [x for (_,x) in sorted(zip(values,[str(key) for key in comdata.keys()]), key=lambda pair: pair[0])]
+        values.sort()
+
+        self.names = names
+        self.values = values
+
+        return names, values
 
 class Collector(object):
     def __init__(self, userName, logfiles, testServer = False, liveServer = True, startDateTime = None, endDateTime = None):
