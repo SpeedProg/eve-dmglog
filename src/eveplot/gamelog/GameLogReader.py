@@ -146,7 +146,6 @@ class GameLog(object):
         with open(path, 'rb') as inf:
             self.parsedLogFiles = pickle.load(inf)
 
-    @staticmethod
     def show_graph(self, name: str, aspic: bool = False) -> None:
         """
         Opens a matplotlib graph with graphs for
