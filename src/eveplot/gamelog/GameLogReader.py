@@ -207,44 +207,43 @@ class GameLog(object):
         else:
             fig, plots = plt.subplots(graph_count)
             if graph_count <= 1:
-                idx = 0
                 plot = plots
     
                 collector = collectors[0]
-                names, values =  collector.get_data()
-                fig.set_size_inches(10, len(values)/2)
-                ind = np.arange(len(values))
-                for tick in plot.yaxis.get_major_ticks():
-                    tick.label.set_fontsize(6)
-                rects = plot.barh(ind, values, 0.5, color='r')
-                plot.set_xlabel(collector.get_label_x(names, values))
-                plot.set_yticks(ind)
-                plot.set_yticklabels(names, fontsize=5)
-                for rect in rects:
-                    height = rect.get_height()
-                    width = rect.get_width()
-                    plot.text(1.05*width, rect.get_y() + height/2.,
-                              f'{width}',
-                              ha='left', va='center', size='10')
+                GameLog.draw_grap(plot, collector)
+
+
             else:
                 for idx, plot in enumerate(plots):
                     collector = collectors[idx]
-                    names, values =  collector.get_data()
-                    ind = np.arange(len(values))
-                    for tick in plot.yaxis.get_major_ticks():
-                        tick.label.set_fontsize(6)
-                    rects = plot.barh(ind, values, 0.5, color='r')
-                    plot.set_xlabel(collector.get_label_x(names, values))
-                    plot.set_yticks(ind)
-                    plot.set_yticklabels(names)
-                    for rect in rects:
-                        height = rect.get_height()
-                        width = rect.get_width()
-                        plot.text(1.05*width, rect.get_y() + height/2.,
-                                '%d' % int(width),
-                                ha='left', va='center', size='10')
+                    GameLog.draw_grap(plot, collector)
             plt.show()
 
+    @staticmethod
+    def draw_grap(plot, collector):
+        names, values = collector.get_data()
+
+        # fig.set_size_inches(10, len(values) / 2)
+        ind = np.arange(0, collector.get_y_max(names), collector.get_y_step_size(names))
+        plot.set_yticks(ind)
+        for tick in plot.yaxis.get_major_ticks():
+            tick.label.set_fontsize(6)
+
+        plot.set_yticklabels(collector.get_y_tick_labels())
+
+        plot.set_ylabel(collector.get_label_y(names, values))
+        plot.set_xlabel(collector.get_label_x(names, values))
+
+        if collector.use_linegraph():
+            plot.plot(values, names)
+        else:
+            rects = plot.barh(ind, values, 0.5, color='r')
+            for rect in rects:
+                height = rect.get_height()
+                width = rect.get_width()
+                plot.text(1.05 * width, rect.get_y() + height / 2.,
+                          f'{width}',
+                          ha='left', va='center', size='10')
 
 class LogFileCreatorThread(Process):
     """
@@ -305,7 +304,7 @@ class AppendLogfileThread(threading.Thread):
     def __init__(self, tasks: JoinableQueue, results: List[ParsedLogFile]):
         threading.Thread.__init__(self)
         self.__tasks: JoinableQueue = tasks
-        self.__results: JoinableQueue = results
+        self.__results: List[ParsedLogFile] = results
     
     def run(self):
         while True:

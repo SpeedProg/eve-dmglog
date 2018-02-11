@@ -1,4 +1,4 @@
-from typing import Sequence, Optional, List, Any, Tuple
+from typing import Sequence, Optional, List, Any, Tuple, Union
 from datetime import datetime
 
 from eveplot.gamelog.parsers.LogFileParser import ParsedLogFile, ParsedLogMessage
@@ -45,8 +45,26 @@ class Collector(object):
         """
         return oldval + 1
 
-    def get_label_x(self, names, values) -> str:
+    def get_label_x(self, names: List[Union[str, int, float]], values: List[int]) -> str:
         return "Undefined"
+
+    def get_label_y(self, yvalues: List[Union[str, int, float]], xvalues: List[int]) -> str:
+        return "Undefined"
+
+    def is_y_values(self) -> bool:
+        return False
+
+    def get_y_step_size(self, yvalues: List[Union[str, int, float]]) -> int:
+        return 1
+
+    def get_y_max(self, yvalues: List[Union[str, int, float]]) -> float:
+        return len(yvalues)
+
+    def use_linegraph(self) -> bool:
+        return False
+
+    def get_y_tick_labels(self) -> List[str]:
+        return self.names
 
     def get_key(self, msg: ParsedLogMessage) -> Any:
         """
@@ -57,7 +75,7 @@ class Collector(object):
         """
         return msg.data.source
 
-    def get_data(self) -> Tuple[List[str], List[int]]:
+    def get_data(self) -> Tuple[List[Union[str, int, float]], List[int]]:
         """
         Get collected data from this collector
         Child classes can but don't need to override this

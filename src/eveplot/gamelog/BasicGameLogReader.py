@@ -15,8 +15,7 @@ class BasicGameLog(GameLog):
         or
         load_from_file if parsed logs where saved with save_to_file
         '''
-        self.parsedLogFiles: List[ParsedLogFile] = []
-        self.logPath: str = log_path
+        super(BasicGameLog, self).__init__(log_path)
 
     def __load_logs(self):
         '''

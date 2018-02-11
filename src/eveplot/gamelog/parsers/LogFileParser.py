@@ -5,6 +5,7 @@ from typing import Optional, List, Dict
 
 import re
 
+
 class ParsedLogMessage(object):
     """
     Containes parsed data about a log message
@@ -51,10 +52,10 @@ class ParsedLogFile(object):
     __forthLine: str = "  Session Started:"
     __fifthLine: str = "-"
     __msg_start: str = "[ "
-    __re_start_time = re.compile("^  Session Started: (\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2})\r$")
-    __re_listener = re.compile("^  Listener: (.*)\r$")
+    __re_start_time = re.compile("^ {2,2}Session Started: (\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2})\r$")
+    __re_listener = re.compile("^ {2,2}Listener: (.*)\r$")
 
-    def __init__(self, filepath: str, data: bytes) -> None:
+    def __init__(self, filepath: str, data: bytes, ignore_none_incursion: bool = True) -> None:
         print(("reading", filepath))
         self.__messages: List[ParsedLogMessage] = []
         self.__status: int = -1
@@ -62,26 +63,29 @@ class ParsedLogFile(object):
         self.__listener: Optional[str] = None
         self.__filepath: str = filepath
         self.__status = self.__readFile(data)
+        print(f"Status {self.__status}")
         self.is_testserver: bool = False
+        self.ignore_none_incursion = ignore_none_incursion
 
     def __readFile(self, data: bytes) -> int:
         """
         Returns __status: 0 = ok, 2 file useless, 1 file invalid
         """
-        file = data.replace(b"\xff\xfe", b"").decode("utf_8")
+        #file = data.replace(b"\xff\xfe", b"").decode("utf_8")
+        file = data.decode("utf_8")
         file = io.StringIO(file)
 
         current_line = file.readline()
         '''
         Check first line
         '''
-        if not current_line.startswith(self.__firstLine):
-            # #print("startline>>"+current_line+"<<")
-            return 1;
+        if not "-------" in current_line:
+            print(f"startline>>{current_line}<< does not start with >>{self.__firstLine}<<")
+            return 1
 
         current_line = file.readline()
         if not current_line.startswith(self.__secondLine):
-            # #print("typeline>>"+current_line+"<<")
+            print("typeline>>"+current_line+"<<")
             return 1;
 
         current_line = file.readline()
@@ -110,7 +114,7 @@ class ParsedLogFile(object):
         if not current_line.startswith(self.__fifthLine):
             # print("endline>>"+current_line+"<<")
             return 2
-
+        print("Parsed Header, starting with message parsing")
         msg: str = self.__getNextMessage(file)
         if '<h4> Available systems</h4>' in msg:
             self.is_testserver = True
@@ -122,6 +126,8 @@ class ParsedLogFile(object):
                 self.__addMessage(parsedMessage)
 
             msg = self.__getNextMessage(file)
+            if msg == '':
+                print("We are done")
         return 0
 
     def __getNextMessage(self, file) -> str:
@@ -205,8 +211,6 @@ class ParsedLogFile(object):
         return self.__messages
 
 
-
-
 class CombatMessageParserHTML(HTMLParser):
     def __init__(self, *args, **kwargs):
         super(CombatMessageParserHTML, self).__init__(*args, **kwargs)
@@ -278,7 +282,7 @@ class CombatMessage(object):
     Contains data about a single combat message
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.type: Optional[str] = None
         self.effect: Optional[str] = None  # "Warp scramble attempt" | ... other dynamic values parsed from msg
         self.direction: Optional[str] = None  # "from" | "to"

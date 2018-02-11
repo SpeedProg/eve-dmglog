@@ -1,4 +1,10 @@
+import datetime
+from typing import List
+
+import numpy as np
+
 from eveplot.gamelog.collectors.Collector import Collector
+from eveplot.gamelog.parsers.LogFileParser import ParsedLogMessage
 
 
 class CollectorDamageIn(Collector):
@@ -200,24 +206,21 @@ class CollectorEwarOut(Collector):
         return "Ewar attempts by me total = " + str(total)
 
 
-class DPSCollector(object):
+class DPSCollector(Collector):
     """
     A collector to display DPS graphs
     this is not finished
     """
 
-    def __init__(self, userName: str, logfiles, testServer=False, liveServer=True, startDateTime=None,
-                 endDateTime=None):
-        self.testServer = testServer
-        self.liveServer = liveServer
-        self.userName = userName
-        self.files = logfiles
+    def __init__(self, user_name: str, log_files,  test_server=False, live_server=True, start_date_time=None,
+                 end_date_time=None, moving_window_size_seconds=20):
+        super(DPSCollector, self).__init__(user_name, log_files, test_server, live_server, start_date_time, end_date_time)
+        print(f"Gotten {len(self.files)} logfiles")
         self.names = None
         self.values = None
-        self.start = startDateTime
-        self.end = endDateTime
-        self.msgStartDate = datetime.datetime.utcnow()
-        self.msgEndDate = datetime.datetime.utcnow()
+        self.msgStartDate = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone(datetime.timedelta(0)))
+        self.msgEndDate = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone(datetime.timedelta(0)))
+        self.timewindow = datetime.timedelta(seconds=moving_window_size_seconds)
 
         # find the min and max date of accepted dmg msgs
         # so we can calculate our x axis from this
@@ -234,17 +237,21 @@ class DPSCollector(object):
                     self.msgStartDate = msg.datetime
                 if msg.datetime > self.msgEndDate:
                     self.msgEndDate = msg.datetime
+        print(self.msgStartDate)
+        print(self.msgEndDate)
 
     def skipfile(self, file):
         if file.get_character() != self.userName:
+            print(f"wrong char {file.get_character()}")
             return True
         if file.is_testserver and not self.testServer:
+            print("File is test server")
             return True
         if not file.is_testserver and not self.liveServer:
             return True
 
     def skipmsg(self, msg):
-        return ((self.start != None and msg.datetime < self.start) or (self.end != None and msg.datetime > self.end))
+        return (msg.data.type != "dmg" or (self.start != None and msg.datetime < self.start) or (self.end != None and msg.datetime > self.end))
 
     def getMsgList(self, file):
         return file.get_messages_in_order()
@@ -252,40 +259,93 @@ class DPSCollector(object):
     def getNewValue(self, target, oldval):
         return oldval + 1
 
-    def getXLabel(self, names, values):
-        return "Undefined"
+    def get_label_x(self, names, values):
+        return "Seconds since first Damage of " + self.userName
+
+    def get_label_y(self, yvalues, xvalues):
+        return "Current DPS"
+
+    def is_y_values(self):
+        return True
+
+    def get_y_step_size(self, yvalues):
+        return int(max(yvalues)/20)
+
+    def get_y_max(self, yvalues):
+        return max(yvalues)
+
+    def use_linegraph(self):
+        return True
+
+    def get_y_tick_labels(self):
+        return np.arange(0, self.get_y_max(self.names), self.get_y_step_size(self.names))
 
     def getKey(self, msg):
         return msg.data.source
 
-    def getData(self, fromDateTime, toDateTime):
+    @staticmethod
+    def get_messages_around(point: datetime.datetime, frame: datetime.timedelta, allMessages: List[ParsedLogMessage]) -> List[ParsedLogMessage]:
+        foundMsgs: List[ParsedLogMessage] = []
+        from_time: datetime.datetime = point-frame
+        to_time: datetime.datetime = point+frame
+        for msg in allMessages:
+            if msg.datetime >= from_time and msg.datetime <= to_time:
+                foundMsgs.append(msg)
+        return foundMsgs
+
+
+    def get_data(self):
         if (self.names is not None and self.values is not None):
             return self.names, self.values
 
-        comdata = dict()
+
+        allMessages: List[ParsedLogMessage] = []
+        minTime: datetime.datetime = None
+        maxTime: datetime.datetime = None
+
         for file in self.files:
             if (self.skipfile(file)):
                 continue
-
             messageList = self.getMsgList(file)
+
             for msg in messageList:
                 if (self.skipmsg(msg)):
                     continue
+                if minTime is None or minTime > msg.datetime:
+                    minTime = msg.datetime
+                if maxTime is None or maxTime < msg.datetime:
+                    maxTime = msg.datetime
+                allMessages.append(msg)
+        if (maxTime is None or minTime is None):
+            print("No messages found for ", self.userName)
+            return [], []
+        maxSeconds: int = int((maxTime-minTime).total_seconds())
+        yvalues = []
+        xvalues = []
+        for at_second in range(0, maxSeconds, 1):
+            point_time = minTime+(datetime.timedelta(seconds=at_second))
+            msgs: List[ParsedLogMessage] = DPSCollector.get_messages_around(point_time, self.timewindow, allMessages)
+            if len(msgs) > 0:
+                dmg = 0
+                earliest: datetime.datetime = None
+                latest: datetime.datetime = None
+                for msg in msgs:
+                    if earliest is None or msg.datetime < earliest:
+                        earliest = msg.datetime
+                    if latest is None or msg.datetime > latest:
+                        latest = msg.datetime
+                    dmg += msg.data.effect
 
-                dmg = None
-                key = self.getKey(msg)
-                if key not in comdata:
-                    dmg = self.getNewValue(msg, 0)
-                else:
-                    dmg = self.getNewValue(msg, comdata[key])
-                comdata[key] = dmg
+                dps = (dmg)/20
+                # better detect edges of no damage
+                if earliest > point_time or latest < point_time:
+                    dps = 0
+                xvalues.append(at_second)
+                yvalues.append(dps)
+            else:
+                xvalues.append(at_second)
+                yvalues.append(0)
 
-        values = [int(key) for key in list(comdata.values())]
-        names = [x for (_, x) in
-                 sorted(zip(values, [str(key) for key in list(comdata.keys())]), key=lambda pair: pair[0])]
-        values.sort()
-
-        self.names = names
-        self.values = values
-
-        return names, values
+        self.names = yvalues
+        self.values = xvalues
+        return self.names, self.values
